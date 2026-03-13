@@ -55,9 +55,9 @@ export default function StudentDashboard({ user }: StudentDashboardProps) {
   });
 
   const currentRoundInfo = rounds.find(r => r.round_number === selectedRound);
-  const isLocked = proposal.is_evaluated || !currentRoundInfo?.is_open || proposal.is_submitted;
-  const canToggleSubmit = !proposal.is_evaluated && currentRoundInfo?.is_open;
-
+  const isLocked = !currentRoundInfo?.is_open;
+  const canToggleSubmit = !!currentRoundInfo?.is_open;
+  
   useEffect(() => {
     fetchRounds();
   }, []);
@@ -268,8 +268,8 @@ export default function StudentDashboard({ user }: StudentDashboardProps) {
 
   const handleSubmit = async (e?: React.FormEvent, forceSubmit?: boolean) => {
     if (e) e.preventDefault();
-    if (proposal.is_evaluated || !currentRoundInfo?.is_open) return;
-
+    if (!currentRoundInfo?.is_open) return;
+    
     if (forceSubmit === true) {
       setShowConfirmModal({
         show: true,
