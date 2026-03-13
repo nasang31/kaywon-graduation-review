@@ -567,13 +567,10 @@ app.post("/api/proposals", authenticate, authorize(["student", "admin"]), async 
     return res.status(403).json({ error: "현재 심사 기간이 아닙니다." });
   }
 
-  const existingProposal = await db.get("SELECT id, is_submitted FROM proposals WHERE user_id = ? AND round_number = ?", [userId, roundNumber]) as any;
-  if (existingProposal) {
-    const evalCount = await db.get("SELECT COUNT(*)::int as count FROM evaluations WHERE proposal_id = ?", [existingProposal.id]) as any;
-    if (Number(evalCount.count) > 0) {
-      return res.status(403).json({ error: "심사가 완료된 기획안은 수정할 수 없습니다." });
-    }
-  }
+ const existingProposal = await db.get(
+  "SELECT id, is_submitted FROM proposals WHERE user_id = ? AND round_number = ?",
+  [userId, roundNumber]
+) as any;
 
   try {
     let presentationOrder = 0;
