@@ -55,7 +55,7 @@ export default function StudentDashboard({ user }: StudentDashboardProps) {
   });
 
   const currentRoundInfo = rounds.find(r => r.round_number === selectedRound);
-  const isLocked = !currentRoundInfo?.is_open;
+  const isLocked = proposal.is_submitted || !currentRoundInfo?.is_open;
   const canToggleSubmit = !!currentRoundInfo?.is_open;
   
   useEffect(() => {
@@ -504,7 +504,7 @@ export default function StudentDashboard({ user }: StudentDashboardProps) {
       {proposal.is_evaluated && (
         <div className="bg-amber-50 border border-amber-100 text-amber-700 px-6 py-4 rounded-2xl text-sm font-medium flex items-center gap-2">
           <CheckCircle size={18} />
-          심사가 완료되어 내용을 수정할 수 없습니다.
+         최종 저장된 상태입니다. 수정하려면 수정 버튼을 눌러주세요.
         </div>
       )}
 
