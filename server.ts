@@ -908,7 +908,11 @@ app.get("/api/admin/stats/:roundNumber", authenticate, authorize(["admin"]), asy
     [roundNum]
   ) as any[];
 
+  const isFinalTrue = (value: any) =>
+    value === true || value === 1 || value === "1";
+
   const stats = [];
+
   for (const s of students) {
     if (!s.proposal_id) {
       stats.push({
@@ -931,31 +935,53 @@ app.get("/api/admin/stats/:roundNumber", authenticate, authorize(["admin"]), asy
     }
 
     const evals = await db.query(
-      `SELECT text_grade, work1_grade, work2_grade, work3_grade, comment, is_final, u.name as judge_name
-       FROM evaluations e
-       JOIN users u ON e.judge_id = u.id
-       WHERE proposal_id = ?`,
+      `
+      SELECT
+        e.text_grade,
+        e.work1_grade,
+        e.work2_grade,
+        e.work3_grade,
+        e.comment,
+        e.is_final,
+        u.name as judge_name
+      FROM evaluations e
+      JOIN users u ON e.judge_id = u.id
+      WHERE e.proposal_id = ?
+      `,
       [s.proposal_id]
     ) as any[];
 
-    const processedEvals = evals.map((e) => {
+    // 핵심: 최종 저장된 평가만 통계에 포함
+    const finalizedEvals = evals.filter((e: any) => isFinalTrue(e.is_final));
+
+    const processedEvals = finalizedEvals.map((e) => {
       const st = scoreOrNull(e.text_grade);
       const s1 = scoreOrNull(e.work1_grade);
       const s2 = scoreOrNull(e.work2_grade);
       const s3 = scoreOrNull(e.work3_grade);
+
+      // 교수 1명의 총점도 "입력된 항목만" 평균
       const judgeTotal = average([st, s1, s2, s3]);
 
       return {
         ...e,
-        scores: { text: st, work1: s1, work2: s2, work3: s3 },
+        scores: {
+          text: st,
+          work1: s1,
+          work2: s2,
+          work3: s3,
+        },
         totalScore: judgeTotal,
       };
     });
 
+    // 항목별 평균: 미입력(null)은 average()에서 자동 제외
     const avgText = average(processedEvals.map((e) => e.scores.text));
     const avgWork1 = average(processedEvals.map((e) => e.scores.work1));
     const avgWork2 = average(processedEvals.map((e) => e.scores.work2));
     const avgWork3 = average(processedEvals.map((e) => e.scores.work3));
+
+    // 전체 평균: 최종 저장된 각 교수 평가 totalScore 평균
     const avgTotal = average(processedEvals.map((e) => e.totalScore));
 
     stats.push({
