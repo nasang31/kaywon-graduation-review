@@ -125,6 +125,22 @@ function normalizeWorks(works: any[]) {
   }));
 }
 
+function normalizeIsFinal(value: any, fallbackWhenUndefined = true) {
+  if (value === undefined || value === null) return fallbackWhenUndefined;
+  return value === true || value === "true" || value === 1 || value === "1";
+}
+
+function scoreOrNull(grade: any): number | null {
+  if (grade === undefined || grade === null || grade === "") return null;
+  return gradeMap[String(grade)] ?? 0;
+}
+
+function average(values: Array<number | null | undefined>) {
+  const filtered = values.filter((v): v is number => typeof v === "number" && !Number.isNaN(v));
+  if (filtered.length === 0) return 0;
+  return filtered.reduce((acc, v) => acc + v, 0) / filtered.length;
+}
+
 app.use(express.json({ limit: "50mb" }));
 app.use(cookieParser());
 
@@ -253,6 +269,19 @@ async function ensureSchema() {
       comment text,
       UNIQUE (proposal_id, judge_id)
     );
+  `);
+
+  await db.exec(`
+    ALTER TABLE evaluations ADD COLUMN IF NOT EXISTS is_final BOOLEAN DEFAULT false;
+    ALTER TABLE evaluations ADD COLUMN IF NOT EXISTS finalized_at timestamptz;
+  `);
+
+  // 기존 데이터 호환: 예전 시스템의 평가는 final 저장으로 간주
+  await db.exec(`
+    UPDATE evaluations
+    SET is_final = true,
+        finalized_at = COALESCE(finalized_at, created_at, now())
+    WHERE is_final IS NULL OR is_final = false;
   `);
 
   const roundCount = await db.get("SELECT COUNT(*)::int as count FROM rounds") as any;
@@ -456,14 +485,16 @@ app.post("/api/admin/seed", authenticate, authorize(["admin"]), async (_req, res
         for (const judge of judges) {
           await db.run(
             `
-            INSERT INTO evaluations (proposal_id, judge_id, text_grade, work1_grade, work2_grade, work3_grade, comment)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO evaluations (proposal_id, judge_id, text_grade, work1_grade, work2_grade, work3_grade, comment, is_final, finalized_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, now())
             ON CONFLICT (proposal_id, judge_id) DO UPDATE SET
               text_grade = EXCLUDED.text_grade,
               work1_grade = EXCLUDED.work1_grade,
               work2_grade = EXCLUDED.work2_grade,
               work3_grade = EXCLUDED.work3_grade,
-              comment = EXCLUDED.comment
+              comment = EXCLUDED.comment,
+              is_final = true,
+              finalized_at = now()
             `,
             [
               proposalId,
@@ -473,6 +504,7 @@ app.post("/api/admin/seed", authenticate, authorize(["admin"]), async (_req, res
               randomGrade(),
               randomGrade(),
               `${roundNum}차 심사평: ${name}의 작품은 인상적입니다. (by ${judge.name})`,
+              true,
             ]
           );
         }
@@ -532,11 +564,11 @@ app.delete("/api/admin/users/:id", authenticate, authorize(["admin"]), async (re
       [userId]
     );
     await db.run(
-      `DELETE FROM works WHERE proposal_id IN (SELECT id FROM proposals WHERE user_id = ?)` ,
+      `DELETE FROM works WHERE proposal_id IN (SELECT id FROM proposals WHERE user_id = ?)`,
       [userId]
     );
     await db.run(
-      `DELETE FROM evaluations WHERE proposal_id IN (SELECT id FROM proposals WHERE user_id = ?)` ,
+      `DELETE FROM evaluations WHERE proposal_id IN (SELECT id FROM proposals WHERE user_id = ?)`,
       [userId]
     );
     await db.run("DELETE FROM proposals WHERE user_id = ?", [userId]);
@@ -567,42 +599,73 @@ app.post("/api/proposals", authenticate, authorize(["student", "admin"]), async 
     return res.status(403).json({ error: "현재 심사 기간이 아닙니다." });
   }
 
- const existingProposal = await db.get(
-  "SELECT id, is_submitted FROM proposals WHERE user_id = ? AND round_number = ?",
-  [userId, roundNumber]
-) as any;
+  const existingProposal = await db.get(
+    "SELECT id, is_submitted, presentation_order, is_participating FROM proposals WHERE user_id = ? AND round_number = ?",
+    [userId, roundNumber]
+  ) as any;
 
   try {
-    let presentationOrder = 0;
-    let isParticipating = 0;
+    const isSubmittedValue = normalizeBoolInt(is_submitted);
+
+    let proposalId: string;
 
     if (existingProposal) {
-      const metadata = await db.get("SELECT presentation_order, is_participating FROM proposals WHERE id = ?", [existingProposal.id]) as any;
-      if (metadata) {
-        presentationOrder = Number(metadata.presentation_order || 0);
-        isParticipating = Number(metadata.is_participating || 0);
-      }
+      proposalId = existingProposal.id;
 
-      const workIds = await db.query("SELECT id FROM works WHERE proposal_id = ?", [existingProposal.id]) as any[];
+      await db.run(
+        `
+        UPDATE proposals
+        SET student_id = ?,
+            name = ?,
+            career_path = ?,
+            title = ?,
+            author = ?,
+            genre = ?,
+            plot = ?,
+            subject = ?,
+            reason = ?,
+            is_submitted = ?
+        WHERE id = ?
+        `,
+        [
+          studentId,
+          name,
+          careerPath,
+          title,
+          author,
+          genre,
+          plot,
+          subject,
+          reason,
+          isSubmittedValue,
+          proposalId,
+        ]
+      );
+
+      const workIds = await db.query("SELECT id FROM works WHERE proposal_id = ?", [proposalId]) as any[];
       for (const w of workIds) {
         await db.run("DELETE FROM work_images WHERE work_id = ?", [w.id]);
       }
-      await db.run("DELETE FROM works WHERE proposal_id = ?", [existingProposal.id]);
-      await db.run("DELETE FROM proposals WHERE id = ?", [existingProposal.id]);
+      await db.run("DELETE FROM works WHERE proposal_id = ?", [proposalId]);
+    } else {
+      const presentationOrder = 0;
+      const isParticipating = 0;
+
+      await db.run(
+        `
+        INSERT INTO proposals (user_id, round_number, student_id, name, career_path, title, author, genre, plot, subject, reason, is_submitted, presentation_order, is_participating)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+        [userId, roundNumber, studentId, name, careerPath, title, author, genre, plot, subject, reason, isSubmittedValue, presentationOrder, isParticipating]
+      );
+
+      const proposal = await db.get(
+        "SELECT id FROM proposals WHERE user_id = ? AND round_number = ?",
+        [userId, roundNumber]
+      ) as any;
+
+      proposalId = proposal.id;
     }
-
-    const isSubmittedValue = normalizeBoolInt(is_submitted);
-
-    await db.run(
-      `
-      INSERT INTO proposals (user_id, round_number, student_id, name, career_path, title, author, genre, plot, subject, reason, is_submitted, presentation_order, is_participating)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `,
-      [userId, roundNumber, studentId, name, careerPath, title, author, genre, plot, subject, reason, isSubmittedValue, presentationOrder, isParticipating]
-    );
-
-    const proposal = await db.get("SELECT id FROM proposals WHERE user_id = ? AND round_number = ?", [userId, roundNumber]) as any;
-    const proposalId = proposal.id;
 
     for (const work of normalizeWorks(works)) {
       await db.run(
@@ -613,7 +676,11 @@ app.post("/api/proposals", authenticate, authorize(["student", "admin"]), async 
         [proposalId, work.workNumber, work.title, work.category, work.summary, work.keywords, work.purpose, work.effect]
       );
 
-      const workData = await db.get("SELECT id FROM works WHERE proposal_id = ? AND work_number = ?", [proposalId, work.workNumber]) as any;
+      const workData = await db.get(
+        "SELECT id FROM works WHERE proposal_id = ? AND work_number = ?",
+        [proposalId, work.workNumber]
+      ) as any;
+
       const workId = workData.id;
 
       for (const imgUrl of work.images) {
@@ -632,15 +699,25 @@ app.get("/api/proposals/my/:userId/:roundNumber", authenticate, async (req: any,
   if (req.user.role === "student" && req.user.id !== req.params.userId) {
     return res.status(403).json({ error: "권한이 없습니다." });
   }
-  const proposal = await db.get("SELECT * FROM proposals WHERE user_id = ? AND round_number = ?", [req.params.userId, req.params.roundNumber]) as any;
+
+  const proposal = await db.get(
+    "SELECT * FROM proposals WHERE user_id = ? AND round_number = ?",
+    [req.params.userId, req.params.roundNumber]
+  ) as any;
+
   if (proposal) {
     const works = await db.query("SELECT * FROM works WHERE proposal_id = ? ORDER BY work_number ASC", [proposal.id]) as any[];
     for (const work of works) {
       const images = await db.query("SELECT url FROM work_images WHERE work_id = ?", [work.id]) as any[];
       work.images = images.map((i: any) => i.url);
     }
-    const evals = await db.get("SELECT COUNT(*)::int as count FROM evaluations WHERE proposal_id = ?", [proposal.id]) as any;
-    res.json({ ...proposal, works, is_evaluated: Number(evals.count) > 0 });
+
+    const evals = await db.query("SELECT is_final FROM evaluations WHERE proposal_id = ?", [proposal.id]) as any[];
+    const isEvaluated = Array.isArray(evals)
+      ? evals.some((e: any) => e.is_final === true || e.is_final === 1 || e.is_final === "1")
+      : false;
+
+    res.json({ ...proposal, works, is_evaluated: isEvaluated });
   } else {
     res.json(null);
   }
@@ -658,7 +735,8 @@ app.get("/api/students/:roundNumber", authenticate, authorize(["judge", "admin"]
     SELECT p.*, u.name as student_name, 
     (SELECT COUNT(*)::int FROM evaluations ev WHERE ev.proposal_id = p.id) as total_eval_count,
     (SELECT COUNT(*)::int FROM evaluations ev WHERE ev.proposal_id = p.id AND ev.judge_id = ?) as my_eval_count,
-    e.text_grade as my_text_grade, e.work1_grade as my_work1_grade, e.work2_grade as my_work2_grade, e.work3_grade as my_work3_grade
+    e.text_grade as my_text_grade, e.work1_grade as my_work1_grade, e.work2_grade as my_work2_grade, e.work3_grade as my_work3_grade,
+    e.is_final as my_is_final
     FROM proposals p
     JOIN users u ON p.user_id = u.id
     LEFT JOIN evaluations e ON e.proposal_id = p.id AND e.judge_id = ?
@@ -712,7 +790,22 @@ app.get("/api/proposals/:id", authenticate, async (req: any, res) => {
 });
 
 app.post("/api/evaluations", authenticate, authorize(["judge", "admin"]), async (req: any, res) => {
-  const { proposalId, judgeId, text_grade, work1_grade, work2_grade, work3_grade, comment } = req.body;
+  if (req.user.role === "admin") {
+    return res.status(403).json({ error: "관리자는 평가를 저장하거나 수정할 수 없습니다." });
+  }
+
+  const proposalId = req.body.proposalId ?? req.body.proposal_id;
+  const judgeId = req.user?.id ?? req.body.judgeId ?? req.body.judge_id;
+  const text_grade = req.body.text_grade;
+  const work1_grade = req.body.work1_grade;
+  const work2_grade = req.body.work2_grade;
+  const work3_grade = req.body.work3_grade;
+  const comment = req.body.comment;
+  const is_final = normalizeIsFinal(req.body.is_final ?? req.body.isFinal, true);
+
+  if (!proposalId || !judgeId) {
+    return res.status(400).json({ error: "proposal 또는 judge 정보가 없습니다." });
+  }
 
   if (req.user.role === "judge" && req.user.id !== judgeId) {
     return res.status(403).json({ error: "권한이 없습니다." });
@@ -721,17 +814,26 @@ app.post("/api/evaluations", authenticate, authorize(["judge", "admin"]), async 
   try {
     await db.run(
       `
-      INSERT INTO evaluations (proposal_id, judge_id, text_grade, work1_grade, work2_grade, work3_grade, comment)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(proposal_id, judge_id) DO UPDATE SET
-        text_grade = EXCLUDED.text_grade,
-        work1_grade = EXCLUDED.work1_grade,
-        work2_grade = EXCLUDED.work2_grade,
-        work3_grade = EXCLUDED.work3_grade,
-        comment = EXCLUDED.comment
+      INSERT INTO evaluations (
+        proposal_id, judge_id, text_grade, work1_grade, work2_grade, work3_grade, comment, is_final, finalized_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, CASE WHEN ? = true THEN now() ELSE NULL END)
+      ON CONFLICT (proposal_id, judge_id) DO UPDATE SET
+        text_grade  = CASE WHEN evaluations.is_final = true THEN evaluations.text_grade  ELSE EXCLUDED.text_grade  END,
+        work1_grade = CASE WHEN evaluations.is_final = true THEN evaluations.work1_grade ELSE EXCLUDED.work1_grade END,
+        work2_grade = CASE WHEN evaluations.is_final = true THEN evaluations.work2_grade ELSE EXCLUDED.work2_grade END,
+        work3_grade = CASE WHEN evaluations.is_final = true THEN evaluations.work3_grade ELSE EXCLUDED.work3_grade END,
+        comment     = CASE WHEN evaluations.is_final = true THEN evaluations.comment     ELSE EXCLUDED.comment     END,
+        is_final    = CASE WHEN evaluations.is_final = true THEN true ELSE EXCLUDED.is_final END,
+        finalized_at = CASE
+          WHEN evaluations.is_final = true THEN evaluations.finalized_at
+          WHEN EXCLUDED.is_final = true THEN now()
+          ELSE NULL
+        END
       `,
-      [proposalId, judgeId, text_grade, work1_grade, work2_grade, work3_grade, comment]
+      [proposalId, judgeId, text_grade, work1_grade, work2_grade, work3_grade, comment, is_final, is_final]
     );
+
     res.json({ success: true });
   } catch (err: any) {
     console.error("[EVALUATIONS save]", err);
@@ -740,11 +842,19 @@ app.post("/api/evaluations", authenticate, authorize(["judge", "admin"]), async 
 });
 
 app.delete("/api/evaluations/:proposalId/:judgeId", authenticate, authorize(["judge", "admin"]), async (req: any, res) => {
+  if (req.user.role === "admin") {
+    return res.status(403).json({ error: "관리자는 평가를 삭제할 수 없습니다." });
+  }
+
   if (req.user.role === "judge" && req.user.id !== req.params.judgeId) {
     return res.status(403).json({ error: "권한이 없습니다." });
   }
+
   try {
-    await db.run("DELETE FROM evaluations WHERE proposal_id = ? AND judge_id = ?", [req.params.proposalId, req.params.judgeId]);
+    await db.run("DELETE FROM evaluations WHERE proposal_id = ? AND judge_id = ? AND (is_final = false OR is_final IS NULL)", [
+      req.params.proposalId,
+      req.params.judgeId,
+    ]);
     res.json({ success: true });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -821,16 +931,20 @@ app.get("/api/admin/stats/:roundNumber", authenticate, authorize(["admin"]), asy
     }
 
     const evals = await db.query(
-      `SELECT text_grade, work1_grade, work2_grade, work3_grade, comment, u.name as judge_name FROM evaluations e JOIN users u ON e.judge_id = u.id WHERE proposal_id = ?`,
+      `SELECT text_grade, work1_grade, work2_grade, work3_grade, comment, is_final, u.name as judge_name
+       FROM evaluations e
+       JOIN users u ON e.judge_id = u.id
+       WHERE proposal_id = ?`,
       [s.proposal_id]
     ) as any[];
 
     const processedEvals = evals.map((e) => {
-      const st = gradeMap[e.text_grade] || 0;
-      const s1 = gradeMap[e.work1_grade] || 0;
-      const s2 = gradeMap[e.work2_grade] || 0;
-      const s3 = gradeMap[e.work3_grade] || 0;
-      const judgeTotal = (st + s1 + s2 + s3) / 4;
+      const st = scoreOrNull(e.text_grade);
+      const s1 = scoreOrNull(e.work1_grade);
+      const s2 = scoreOrNull(e.work2_grade);
+      const s3 = scoreOrNull(e.work3_grade);
+      const judgeTotal = average([st, s1, s2, s3]);
+
       return {
         ...e,
         scores: { text: st, work1: s1, work2: s2, work3: s3 },
@@ -838,47 +952,28 @@ app.get("/api/admin/stats/:roundNumber", authenticate, authorize(["admin"]), asy
       };
     });
 
-    if (processedEvals.length > 0) {
-      const avgTotal = processedEvals.reduce((acc, e) => acc + e.totalScore, 0) / processedEvals.length;
-      const avgText = processedEvals.reduce((acc, e) => acc + e.scores.text, 0) / processedEvals.length;
-      const avgWork1 = processedEvals.reduce((acc, e) => acc + e.scores.work1, 0) / processedEvals.length;
-      const avgWork2 = processedEvals.reduce((acc, e) => acc + e.scores.work2, 0) / processedEvals.length;
-      const avgWork3 = processedEvals.reduce((acc, e) => acc + e.scores.work3, 0) / processedEvals.length;
+    const avgText = average(processedEvals.map((e) => e.scores.text));
+    const avgWork1 = average(processedEvals.map((e) => e.scores.work1));
+    const avgWork2 = average(processedEvals.map((e) => e.scores.work2));
+    const avgWork3 = average(processedEvals.map((e) => e.scores.work3));
+    const avgTotal = average(processedEvals.map((e) => e.totalScore));
 
-      stats.push({
-        id: s.proposal_id,
-        user_id: s.user_id,
-        student_id: s.student_id,
-        name: s.name,
-        title: s.title || "제목 없음",
-        is_submitted: s.is_submitted,
-        is_participating: s.is_participating,
-        presentation_order: s.presentation_order,
-        evaluations: processedEvals,
-        averageScore: avgTotal.toFixed(2),
-        avgText: avgText.toFixed(2),
-        avgWork1: avgWork1.toFixed(2),
-        avgWork2: avgWork2.toFixed(2),
-        avgWork3: avgWork3.toFixed(2),
-      });
-    } else {
-      stats.push({
-        id: s.proposal_id,
-        user_id: s.user_id,
-        student_id: s.student_id,
-        name: s.name,
-        title: s.title || "제목 없음",
-        is_submitted: s.is_submitted,
-        is_participating: s.is_participating,
-        presentation_order: s.presentation_order,
-        evaluations: [],
-        averageScore: "0.00",
-        avgText: "0.00",
-        avgWork1: "0.00",
-        avgWork2: "0.00",
-        avgWork3: "0.00",
-      });
-    }
+    stats.push({
+      id: s.proposal_id,
+      user_id: s.user_id,
+      student_id: s.student_id,
+      name: s.name,
+      title: s.title || "제목 없음",
+      is_submitted: s.is_submitted,
+      is_participating: s.is_participating,
+      presentation_order: s.presentation_order,
+      evaluations: processedEvals,
+      averageScore: avgTotal.toFixed(2),
+      avgText: avgText.toFixed(2),
+      avgWork1: avgWork1.toFixed(2),
+      avgWork2: avgWork2.toFixed(2),
+      avgWork3: avgWork3.toFixed(2),
+    });
   }
 
   res.json(stats);
@@ -905,9 +1000,12 @@ app.post("/api/upload", authenticate, (req, res) => {
 app.get("/api/admin/backup", authenticate, authorize(["admin"]), async (_req, res) => {
   try {
     const proposals = await db.query("SELECT * FROM proposals");
+    const works = await db.query("SELECT * FROM works");
+    const work_images = await db.query("SELECT * FROM work_images");
     const evaluations = await db.query("SELECT * FROM evaluations");
     const users = await db.query("SELECT id, username, role, name, student_id FROM users");
-    res.json({ proposals, evaluations, users });
+    const rounds = await db.query("SELECT * FROM rounds");
+    res.json({ proposals, works, work_images, evaluations, users, rounds });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
