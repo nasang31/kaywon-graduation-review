@@ -982,8 +982,8 @@ app.get("/api/admin/stats/:roundNumber", authenticate, authorize(["admin"]), asy
     const avgWork3 = average(processedEvals.map((e) => e.scores.work3));
 
     // 전체 평균: 최종 저장된 각 교수 평가 totalScore 평균
-    const avgTotal = average(processedEvals.map((e) => e.totalScore));
-
+    const avgTotal = average([avgText, avgWork1, avgWork2, avgWork3]);
+    
     stats.push({
       id: s.proposal_id,
       user_id: s.user_id,
