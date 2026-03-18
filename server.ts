@@ -600,18 +600,18 @@ app.post("/api/proposals", authenticate, authorize(["student", "admin"]), async 
   }
 
   const existingProposal = await db.get(
-    "SELECT id, is_submitted, presentation_order, is_participating FROM proposals WHERE user_id = ? AND round_number = ?",
+    "SELECT id, presentation_order, is_participating FROM proposals WHERE user_id = ? AND round_number = ?",
     [userId, roundNumber]
   ) as any;
 
   try {
     const isSubmittedValue = normalizeBoolInt(is_submitted);
-
     let proposalId: string;
 
     if (existingProposal) {
       proposalId = existingProposal.id;
 
+      // 핵심: proposal 자체는 삭제하지 않고 UPDATE만 수행
       await db.run(
         `
         UPDATE proposals
@@ -638,10 +638,11 @@ app.post("/api/proposals", authenticate, authorize(["student", "admin"]), async 
           subject,
           reason,
           isSubmittedValue,
-          proposalId,
+          proposalId
         ]
       );
 
+      // works / images만 교체
       const workIds = await db.query("SELECT id FROM works WHERE proposal_id = ?", [proposalId]) as any[];
       for (const w of workIds) {
         await db.run("DELETE FROM work_images WHERE work_id = ?", [w.id]);
@@ -653,10 +654,18 @@ app.post("/api/proposals", authenticate, authorize(["student", "admin"]), async 
 
       await db.run(
         `
-        INSERT INTO proposals (user_id, round_number, student_id, name, career_path, title, author, genre, plot, subject, reason, is_submitted, presentation_order, is_participating)
+        INSERT INTO proposals (
+          user_id, round_number, student_id, name, career_path,
+          title, author, genre, plot, subject, reason,
+          is_submitted, presentation_order, is_participating
+        )
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
-        [userId, roundNumber, studentId, name, careerPath, title, author, genre, plot, subject, reason, isSubmittedValue, presentationOrder, isParticipating]
+        [
+          userId, roundNumber, studentId, name, careerPath,
+          title, author, genre, plot, subject, reason,
+          isSubmittedValue, presentationOrder, isParticipating
+        ]
       );
 
       const proposal = await db.get(
@@ -673,7 +682,16 @@ app.post("/api/proposals", authenticate, authorize(["student", "admin"]), async 
         INSERT INTO works (proposal_id, work_number, title, category, summary, keywords, purpose, effect)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         `,
-        [proposalId, work.workNumber, work.title, work.category, work.summary, work.keywords, work.purpose, work.effect]
+        [
+          proposalId,
+          work.workNumber,
+          work.title,
+          work.category,
+          work.summary,
+          work.keywords,
+          work.purpose,
+          work.effect
+        ]
       );
 
       const workData = await db.get(
