@@ -1074,28 +1074,40 @@ app.get("/api/admin/stats/:roundNumber", authenticate, authorize(["admin"]), asy
 
 // Image Upload
 app.post("/api/upload", authenticate, (req, res) => {
+  console.log("[UPLOAD] route reached");
+
   upload.single("image")(req, res, async (err) => {
     try {
       if (err) {
+        console.error("[UPLOAD] multer error:", err);
+
         if (err instanceof multer.MulterError && err.code === "LIMIT_FILE_SIZE") {
           return res.status(400).json({ error: "이미지 용량이 너무 큽니다. (최대 10MB)" });
         }
+
         return res.status(400).json({ error: err.message || "업로드 중 오류가 발생했습니다." });
       }
 
       if (!req.file) {
+        console.log("[UPLOAD] no file");
         return res.status(400).json({ error: "파일이 없습니다." });
       }
 
+      console.log("[UPLOAD] original file:", req.file.originalname);
+      console.log("[UPLOAD] mime type:", req.file.mimetype);
+      console.log("[UPLOAD] bucket:", SUPABASE_STORAGE_BUCKET);
+
       if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+        console.error("[UPLOAD] missing supabase env");
         return res.status(500).json({ error: "Supabase Storage 환경변수가 설정되지 않았습니다." });
       }
 
       const publicUrl = await uploadImageToSupabase(req.file);
+      console.log("[UPLOAD] publicUrl:", publicUrl);
 
       return res.json({ url: publicUrl });
     } catch (error: any) {
-      console.error("[upload] supabase upload error:", error);
+      console.error("[UPLOAD] supabase upload error:", error);
       return res.status(500).json({
         error: error?.message || "Supabase 업로드 중 오류가 발생했습니다.",
       });
