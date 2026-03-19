@@ -107,15 +107,6 @@ export default function JudgeDashboard({ user, forcedProposalId }: JudgeDashboar
   }, [evaluation, selectedProposal]);
 
   // Periodic auto-save to server (every 1 minute)
-  useEffect(() => {
-    if (!selectedProposal) return;
-
-    const timer = setInterval(() => {
-      saveEvaluationToServer(true);
-    }, 60000);
-
-    return () => clearInterval(timer);
-  }, [evaluation, selectedProposal]);
 
   useEffect(() => {
     if (forcedProposalId) {
