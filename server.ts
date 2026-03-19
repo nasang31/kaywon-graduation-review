@@ -969,8 +969,14 @@ app.get("/api/admin/stats/:roundNumber", authenticate, authorize(["admin"]), asy
       [s.proposal_id]
     ) as any[];
 
-    // 핵심: 최종 저장된 평가만 통계에 포함
-    const finalizedEvals = evals.filter((e: any) => isFinalTrue(e.is_final));
+    // 핵심: 최종 저장 + 4개 항목이 모두 입력된 평가만 통계에 포함
+    const finalizedEvals = evals.filter((e: any) =>
+      isFinalTrue(e.is_final) &&
+      e.text_grade &&
+      e.work1_grade &&
+      e.work2_grade &&
+      e.work3_grade
+    );
 
     const processedEvals = finalizedEvals.map((e) => {
       const st = scoreOrNull(e.text_grade);
@@ -978,7 +984,7 @@ app.get("/api/admin/stats/:roundNumber", authenticate, authorize(["admin"]), asy
       const s2 = scoreOrNull(e.work2_grade);
       const s3 = scoreOrNull(e.work3_grade);
 
-      // 교수 1명의 총점도 "입력된 항목만" 평균
+      // 교수 1명의 총점: 4개 항목이 모두 있는 평가만 들어오므로 정상 평균
       const judgeTotal = average([st, s1, s2, s3]);
 
       return {
@@ -993,13 +999,13 @@ app.get("/api/admin/stats/:roundNumber", authenticate, authorize(["admin"]), asy
       };
     });
 
-    // 항목별 평균: 미입력(null)은 average()에서 자동 제외
+    // 항목별 평균
     const avgText = average(processedEvals.map((e) => e.scores.text));
     const avgWork1 = average(processedEvals.map((e) => e.scores.work1));
     const avgWork2 = average(processedEvals.map((e) => e.scores.work2));
     const avgWork3 = average(processedEvals.map((e) => e.scores.work3));
 
-    // 전체 평균: 최종 저장된 각 교수 평가 totalScore 평균
+    // 전체 평균: 4개 항목 평균의 평균
     const avgTotal = average([avgText, avgWork1, avgWork2, avgWork3]);
     
     stats.push({
@@ -1018,10 +1024,6 @@ app.get("/api/admin/stats/:roundNumber", authenticate, authorize(["admin"]), asy
       avgWork2: avgWork2.toFixed(2),
       avgWork3: avgWork3.toFixed(2),
     });
-  }
-
-  res.json(stats);
-});
 
 // Image Upload
 app.post("/api/upload", authenticate, (req, res) => {
