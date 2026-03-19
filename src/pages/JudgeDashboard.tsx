@@ -11,7 +11,23 @@ interface JudgeDashboardProps {
   forcedProposalId?: number | null;
 }
 
-// ── 빈 평가 초기값 (여러 곳에서 재사용) ─────────────────────────────
+// ── 스피너 아이콘 ──────────────────────────────────────────────────
+function SpinnerIcon() {
+  return (
+    <svg
+      className="animate-spin"
+      width={14} height={14}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+    >
+      <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+    </svg>
+  );
+}
+
+// ── 빈 평가 초기값 ────────────────────────────────────────────────
 const EMPTY_EVALUATION = {
   text_grade:  '',
   work1_grade: '',
@@ -20,10 +36,14 @@ const EMPTY_EVALUATION = {
   comment:     ''
 };
 
-// ── 0점(미입력) 항목을 분모에서 제외하는 점수 평균 ──────────────────
-// calculateAverage(evals)   : 여러 평가자의 전체 항목 기준
-// calcJudgeScore(e)         : 단일 평가자 1명 기준 (관리자 카드용)
-function calcJudgeScore(e: any): number {
+// ── 0점(미입력) 항목 분모 제외 점수 계산 ─────────────────────────
+// 단일 평가자 객체를 받아 처리하는 공통 함수
+function calcJudgeScore(e: {
+  text_grade?: string;
+  work1_grade?: string;
+  work2_grade?: string;
+  work3_grade?: string;
+}): number {
   const items = [
     GRADE_SCORES[e.text_grade  as keyof typeof GRADE_SCORES],
     GRADE_SCORES[e.work1_grade as keyof typeof GRADE_SCORES],
@@ -36,6 +56,18 @@ function calcJudgeScore(e: any): number {
     : valid.reduce((a, b) => a + b, 0) / valid.length;
 }
 
+// ✅ calcMyScore는 calcJudgeScore로 통일 — 산식 일관성 유지
+// 목록/순위의 학생 데이터 구조(my_xxx_grade)를 어댑터로 변환
+function calcMyScore(s: any): number {
+  return calcJudgeScore({
+    text_grade:  s.my_text_grade,
+    work1_grade: s.my_work1_grade,
+    work2_grade: s.my_work2_grade,
+    work3_grade: s.my_work3_grade,
+  });
+}
+
+// ── 전체 평가자 평균 (0점 제외) ──────────────────────────────────
 function calculateAverage(evals: any[]): string {
   if (!evals || evals.length === 0) return '0.00';
   let totalScore = 0;
@@ -57,33 +89,38 @@ function calculateAverage(evals: any[]): string {
   return totalCount === 0 ? '0.00' : (totalScore / totalCount).toFixed(2);
 }
 
-// ── draft JSON → evaluation 상태로 안전하게 변환 ────────────────────
+// ── draft JSON → evaluation 안전 변환 ────────────────────────────
 function parseDraft(raw: string): typeof EMPTY_EVALUATION | null {
   try {
-    const parsed = JSON.parse(raw);
+    const p = JSON.parse(raw);
     return {
-      text_grade:  parsed.text_grade  || '',
-      work1_grade: parsed.work1_grade || '',
-      work2_grade: parsed.work2_grade || '',
-      work3_grade: parsed.work3_grade || '',
-      comment:     parsed.comment     || ''
+      text_grade:  p.text_grade  || '',
+      work1_grade: p.work1_grade || '',
+      work2_grade: p.work2_grade || '',
+      work3_grade: p.work3_grade || '',
+      comment:     p.comment     || ''
     };
   } catch {
     return null;
   }
 }
 
-// ── 목록/순위 카드의 내 점수 계산 (NaN 방지) ────────────────────────
-function calcMyScore(s: any): number {
+// ── 사용자 아이콘 ──────────────────────────────────────────────────
+function UserIcon({ size }: { size: number }) {
   return (
-    (GRADE_SCORES[s.my_text_grade  as keyof typeof GRADE_SCORES] || 0) +
-    (GRADE_SCORES[s.my_work1_grade as keyof typeof GRADE_SCORES] || 0) +
-    (GRADE_SCORES[s.my_work2_grade as keyof typeof GRADE_SCORES] || 0) +
-    (GRADE_SCORES[s.my_work3_grade as keyof typeof GRADE_SCORES] || 0)
-  ) / 4;
+    <svg
+      width={size} height={size}
+      viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth="2"
+      strokeLinecap="round" strokeLinejoin="round"
+    >
+      <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
+      <circle cx="12" cy="7" r="4" />
+    </svg>
+  );
 }
 
-// ─────────────────────────────────────────────────────────────────
+// ═════════════════════════════════════════════════════════════════
 export default function JudgeDashboard({ user, forcedProposalId }: JudgeDashboardProps) {
   const [selectedRound, setSelectedRound]           = useState(1);
   const [students, setStudents]                     = useState<any[]>([]);
@@ -92,13 +129,13 @@ export default function JudgeDashboard({ user, forcedProposalId }: JudgeDashboar
   const [zoomScale, setZoomScale]                   = useState(1);
   const [evaluation, setEvaluation]                 = useState(EMPTY_EVALUATION);
   const [isNavigating, setIsNavigating]             = useState(false);
+  const [navDirection, setNavDirection]             = useState<'prev' | 'next' | null>(null);
   const [isSavingEvaluation, setIsSavingEvaluation] = useState(false);
   const [showRanking, setShowRanking]               = useState(true);
   const [isEditing, setIsEditing]                   = useState(false);
   const [listScrollPos, setListScrollPos]           = useState(0);
   const [lastSelectedId, setLastSelectedId]         = useState<number | null>(null);
 
-  // race condition 방어
   const latestRequestId = useRef(0);
 
   // ── 타입 안전 작품 등급 세터 ────────────────────────────────────
@@ -151,10 +188,8 @@ export default function JudgeDashboard({ user, forcedProposalId }: JudgeDashboar
     };
   }, [zoomImage]);
 
-  // ── 라운드 변경 시 목록 갱신 ────────────────────────────────────
   useEffect(() => { fetchStudents(); }, [selectedRound]);
 
-  // ── forcedProposalId 진입 처리 ──────────────────────────────────
   useEffect(() => {
     if (forcedProposalId) handleSelectStudent(forcedProposalId);
   }, [forcedProposalId]);
@@ -169,9 +204,9 @@ export default function JudgeDashboard({ user, forcedProposalId }: JudgeDashboar
     }
   }, [evaluation, selectedProposal, isEditing]);
 
-  // ─────────────────────────────────────────────────────────────
+  // ───────────────────────────────────────────────────────────────
   // API
-  // ─────────────────────────────────────────────────────────────
+  // ───────────────────────────────────────────────────────────────
   const fetchStudents = async () => {
     try {
       const res  = await fetch(`/api/students/${selectedRound}?judgeId=${user.id}`);
@@ -183,9 +218,13 @@ export default function JudgeDashboard({ user, forcedProposalId }: JudgeDashboar
     }
   };
 
-  const handleSelectStudent = async (id: number) => {
+  const handleSelectStudent = async (
+    id: number,
+    direction: 'prev' | 'next' | null = null
+  ) => {
     if (!selectedProposal) setListScrollPos(window.scrollY);
     setLastSelectedId(id);
+    setNavDirection(direction);
 
     const requestId = ++latestRequestId.current;
 
@@ -194,7 +233,6 @@ export default function JudgeDashboard({ user, forcedProposalId }: JudgeDashboar
       const res  = await fetch(`/api/proposals/${id}?judgeId=${user.id}&role=${user.role}`);
       const data = await res.json();
 
-      // 늦게 도착한 응답 무시
       if (requestId !== latestRequestId.current) return;
 
       setSelectedProposal(data);
@@ -202,7 +240,6 @@ export default function JudgeDashboard({ user, forcedProposalId }: JudgeDashboar
       const myEval = data.evaluations?.find((e: any) => e.judge_id === user.id);
 
       if (myEval) {
-        // 서버 정식 평가 우선 적용
         setEvaluation({
           text_grade:  myEval.text_grade  || '',
           work1_grade: myEval.work1_grade || '',
@@ -212,7 +249,6 @@ export default function JudgeDashboard({ user, forcedProposalId }: JudgeDashboar
         });
         setIsEditing(false);
       } else {
-        // 서버 평가 없을 때만 draft 복원 (명시적 할당)
         const raw = localStorage.getItem(`eval_draft_${user.id}_${id}`);
         setEvaluation(raw ? (parseDraft(raw) ?? EMPTY_EVALUATION) : EMPTY_EVALUATION);
         setIsEditing(true);
@@ -220,7 +256,10 @@ export default function JudgeDashboard({ user, forcedProposalId }: JudgeDashboar
     } catch (err) {
       console.error(err);
     } finally {
-      if (requestId === latestRequestId.current) setIsNavigating(false);
+      if (requestId === latestRequestId.current) {
+        setIsNavigating(false);
+        setNavDirection(null);
+      }
     }
   };
 
@@ -292,13 +331,16 @@ export default function JudgeDashboard({ user, forcedProposalId }: JudgeDashboar
     }
   };
 
-  // ══════════════════════════════════════════════════════════════
+  // ═════════════════════════════════════════════════════════════════
   // 상세 보기 화면
-  // ══════════════════════════════════════════════════════════════
+  // ═════════════════════════════════════════════════════════════════
   if (selectedProposal) {
     const currentIndex = students.findIndex(s => s.id === selectedProposal.id);
     const prevStudent  = currentIndex > 0                   ? students[currentIndex - 1] : null;
     const nextStudent  = currentIndex < students.length - 1 ? students[currentIndex + 1] : null;
+
+    // 공통 버튼 비활성화 조건
+    const isLocked = isNavigating || isSavingEvaluation;
 
     return (
       <div className="space-y-8 pb-20">
@@ -314,20 +356,26 @@ export default function JudgeDashboard({ user, forcedProposalId }: JudgeDashboar
           <div className="flex gap-2">
             {prevStudent && (
               <button
-                onClick={() => handleSelectStudent(prevStudent.id)}
-                disabled={isNavigating || isSavingEvaluation}
+                onClick={() => handleSelectStudent(prevStudent.id, 'prev')}
+                disabled={isLocked}
                 className="px-4 py-2 bg-white border border-black/10 rounded-xl text-xs font-bold hover:bg-black/5 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <ArrowLeft size={14} /> 이전 학생
+                {isNavigating && navDirection === 'prev'
+                  ? <><SpinnerIcon /> 이동 중...</>
+                  : <><ArrowLeft size={14} /> 이전 학생</>
+                }
               </button>
             )}
             {nextStudent && (
               <button
-                onClick={() => handleSelectStudent(nextStudent.id)}
-                disabled={isNavigating || isSavingEvaluation}
+                onClick={() => handleSelectStudent(nextStudent.id, 'next')}
+                disabled={isLocked}
                 className="px-4 py-2 bg-white border border-black/10 rounded-xl text-xs font-bold hover:bg-black/5 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                다음 학생 <ChevronRight size={14} />
+                {isNavigating && navDirection === 'next'
+                  ? <><SpinnerIcon /> 이동 중...</>
+                  : <>다음 학생 <ChevronRight size={14} /></>
+                }
               </button>
             )}
           </div>
@@ -488,8 +536,6 @@ export default function JudgeDashboard({ user, forcedProposalId }: JudgeDashboar
 
           {/* ── 평가 + 관리자 패널 ── */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-
-            {/* 평가 폼 */}
             <div className="lg:col-span-2">
               {user.role !== 'admin' ? (
                 <section className="bg-white p-8 rounded-3xl shadow-sm border border-black/5">
@@ -509,9 +555,7 @@ export default function JudgeDashboard({ user, forcedProposalId }: JudgeDashboar
                         <div className="grid grid-cols-3 gap-1">
                           {Object.keys(GRADE_SCORES).map(g => (
                             <button
-                              key={g}
-                              type="button"
-                              disabled={!isEditing}
+                              key={g} type="button" disabled={!isEditing}
                               onClick={() => setEvaluation(prev => ({ ...prev, text_grade: g }))}
                               className={`py-2 rounded-lg text-xs font-bold border transition-all
                                 ${evaluation.text_grade === g
@@ -534,9 +578,7 @@ export default function JudgeDashboard({ user, forcedProposalId }: JudgeDashboar
                           <div className="grid grid-cols-3 gap-1">
                             {Object.keys(GRADE_SCORES).map(g => (
                               <button
-                                key={g}
-                                type="button"
-                                disabled={!isEditing}
+                                key={g} type="button" disabled={!isEditing}
                                 onClick={() => setWorkGrade(num, g)}
                                 className={`py-2 rounded-lg text-xs font-bold border transition-all
                                   ${evaluation[`work${num}_grade` as keyof typeof evaluation] === g
@@ -575,10 +617,11 @@ export default function JudgeDashboard({ user, forcedProposalId }: JudgeDashboar
                           >
                             <FileText size={18} /> 심사 수정 시작하기
                           </button>
+                          {/* ✅ isNavigating도 함께 비활성화 */}
                           <button
                             type="button"
                             onClick={handleCancelEvaluation}
-                            disabled={isSavingEvaluation}
+                            disabled={isLocked}
                             className="px-6 bg-red-50 text-red-500 border border-red-100 py-4 rounded-xl font-bold hover:bg-red-100 transition-all disabled:opacity-50"
                           >
                             삭제
@@ -593,7 +636,6 @@ export default function JudgeDashboard({ user, forcedProposalId }: JudgeDashboar
                                 (e: any) => e.judge_id === user.id
                               );
                               if (myEval) {
-                                // 기존 평가 있음 → 서버값 복원 후 읽기 모드
                                 setEvaluation({
                                   text_grade:  myEval.text_grade  || '',
                                   work1_grade: myEval.work1_grade || '',
@@ -603,7 +645,6 @@ export default function JudgeDashboard({ user, forcedProposalId }: JudgeDashboar
                                 });
                                 setIsEditing(false);
                               } else {
-                                // 새 평가 작성 중 취소 → 목록으로
                                 setSelectedProposal(null);
                               }
                             }}
@@ -613,10 +654,14 @@ export default function JudgeDashboard({ user, forcedProposalId }: JudgeDashboar
                           </button>
                           <button
                             type="submit"
-                            disabled={isSavingEvaluation}
+                            disabled={isLocked}
                             className="flex-[2] bg-black text-white py-4 rounded-xl font-bold hover:bg-black/90 transition-all disabled:opacity-50 shadow-lg shadow-black/10"
                           >
-                            {isSavingEvaluation ? '저장 중...' : '심사 완료 및 저장'}
+                            {isSavingEvaluation ? (
+                              <span className="flex items-center justify-center gap-2">
+                                <SpinnerIcon /> 저장 중...
+                              </span>
+                            ) : '심사 완료 및 저장'}
                           </button>
                         </>
                       )}
@@ -643,33 +688,27 @@ export default function JudgeDashboard({ user, forcedProposalId }: JudgeDashboar
                   </h3>
                   <div className="space-y-4">
                     {selectedProposal.evaluations && selectedProposal.evaluations.length > 0 ? (
-                      selectedProposal.evaluations.map((e: any, i: number) => {
-                        // ✅ 개별 교수 점수도 calculateAverage와 동일한 규칙 (0 제외)
-                        const judgeScore = calcJudgeScore(e);
-                        return (
-                          <div key={i} className="p-4 bg-black/[0.02] rounded-2xl border border-black/5">
-                            <div className="flex justify-between items-center mb-2">
-                              <span className="text-sm font-bold">{e.judge_name}</span>
-                              <span className="text-xs font-bold text-amber-600">
-                                {judgeScore.toFixed(1)}점
-                              </span>
-                            </div>
-                            <div className="grid grid-cols-2 gap-2 mb-3 text-[10px] text-black/40">
-                              <span>텍스트: {e.text_grade}</span>
-                              <span>작품1: {e.work1_grade}</span>
-                              <span>작품2: {e.work2_grade}</span>
-                              <span>작품3: {e.work3_grade}</span>
-                            </div>
-                            <p className="text-xs text-black/60 italic leading-relaxed">
-                              "{e.comment || '의견 없음'}"
-                            </p>
+                      selectedProposal.evaluations.map((e: any, i: number) => (
+                        <div key={i} className="p-4 bg-black/[0.02] rounded-2xl border border-black/5">
+                          <div className="flex justify-between items-center mb-2">
+                            <span className="text-sm font-bold">{e.judge_name}</span>
+                            <span className="text-xs font-bold text-amber-600">
+                              {calcJudgeScore(e).toFixed(1)}점
+                            </span>
                           </div>
-                        );
-                      })
+                          <div className="grid grid-cols-2 gap-2 mb-3 text-[10px] text-black/40">
+                            <span>텍스트: {e.text_grade}</span>
+                            <span>작품1: {e.work1_grade}</span>
+                            <span>작품2: {e.work2_grade}</span>
+                            <span>작품3: {e.work3_grade}</span>
+                          </div>
+                          <p className="text-xs text-black/60 italic leading-relaxed">
+                            "{e.comment || '의견 없음'}"
+                          </p>
+                        </div>
+                      ))
                     ) : (
-                      <p className="text-center py-8 text-black/20 text-sm">
-                        아직 등록된 평가가 없습니다.
-                      </p>
+                      <p className="text-center py-8 text-black/20 text-sm">아직 등록된 평가가 없습니다.</p>
                     )}
                   </div>
                 </section>
@@ -689,20 +728,26 @@ export default function JudgeDashboard({ user, forcedProposalId }: JudgeDashboar
           <div className="flex gap-2">
             {prevStudent && (
               <button
-                onClick={() => handleSelectStudent(prevStudent.id)}
-                disabled={isNavigating || isSavingEvaluation}
+                onClick={() => handleSelectStudent(prevStudent.id, 'prev')}
+                disabled={isLocked}
                 className="px-4 py-2 bg-white border border-black/10 rounded-xl text-xs font-bold hover:bg-black/5 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <ArrowLeft size={14} /> 이전 학생
+                {isNavigating && navDirection === 'prev'
+                  ? <><SpinnerIcon /> 이동 중...</>
+                  : <><ArrowLeft size={14} /> 이전 학생</>
+                }
               </button>
             )}
             {nextStudent && (
               <button
-                onClick={() => handleSelectStudent(nextStudent.id)}
-                disabled={isNavigating || isSavingEvaluation}
+                onClick={() => handleSelectStudent(nextStudent.id, 'next')}
+                disabled={isLocked}
                 className="px-4 py-2 bg-black text-white rounded-xl text-xs font-bold hover:bg-black/90 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                다음 학생 <ChevronRight size={14} />
+                {isNavigating && navDirection === 'next'
+                  ? <><SpinnerIcon /> 이동 중...</>
+                  : <>다음 학생 <ChevronRight size={14} /></>
+                }
               </button>
             )}
           </div>
@@ -723,18 +768,14 @@ export default function JudgeDashboard({ user, forcedProposalId }: JudgeDashboar
                   <button
                     onClick={e => { e.stopPropagation(); setZoomScale(prev => Math.max(0.5, prev - 0.25)); }}
                     className="w-10 h-10 flex items-center justify-center text-white hover:bg-white/10 rounded-lg transition-colors"
-                  >
-                    -
-                  </button>
+                  >-</button>
                   <div className="w-16 flex items-center justify-center text-white text-xs font-bold">
                     {Math.round(zoomScale * 100)}%
                   </div>
                   <button
                     onClick={e => { e.stopPropagation(); setZoomScale(prev => Math.min(5, prev + 0.25)); }}
                     className="w-10 h-10 flex items-center justify-center text-white hover:bg-white/10 rounded-lg transition-colors"
-                  >
-                    +
-                  </button>
+                  >+</button>
                 </div>
                 <button
                   className="px-6 py-2 bg-white text-black rounded-xl font-bold hover:bg-white/90 transition-all"
@@ -751,12 +792,9 @@ export default function JudgeDashboard({ user, forcedProposalId }: JudgeDashboar
                   animate={{ opacity: 1, scale: zoomScale }}
                   exit={{ opacity: 0, scale: 0.9 }}
                   transition={{ type: 'spring', stiffness: 500, damping: 50 }}
-                  drag
-                  dragMomentum={false}
-                  dragElastic={0}
+                  drag dragMomentum={false} dragElastic={0}
                   dragTransition={{ power: 0, timeConstant: 0 }}
-                  src={zoomImage}
-                  alt="Zoomed"
+                  src={zoomImage} alt="Zoomed"
                   className="max-w-none shadow-2xl rounded-sm select-none cursor-grab active:cursor-grabbing"
                   style={{
                     transformOrigin: 'center center',
@@ -775,9 +813,9 @@ export default function JudgeDashboard({ user, forcedProposalId }: JudgeDashboar
     );
   }
 
-  // ══════════════════════════════════════════════════════════════
+  // ═════════════════════════════════════════════════════════════════
   // 목록 화면
-  // ══════════════════════════════════════════════════════════════
+  // ═════════════════════════════════════════════════════════════════
   return (
     <div className="space-y-8">
       <header className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
@@ -811,8 +849,6 @@ export default function JudgeDashboard({ user, forcedProposalId }: JudgeDashboar
       </header>
 
       <div className="flex flex-col lg:flex-row gap-8">
-
-        {/* 학생 카드 목록 */}
         <div className={`flex-1 grid grid-cols-1 md:grid-cols-2 ${showRanking ? 'lg:grid-cols-2' : 'lg:grid-cols-3'} gap-6`}>
           {students.map(student => {
             const myScore = calcMyScore(student);
@@ -911,19 +947,5 @@ export default function JudgeDashboard({ user, forcedProposalId }: JudgeDashboar
         </div>
       )}
     </div>
-  );
-}
-
-function UserIcon({ size }: { size: number }) {
-  return (
-    <svg
-      width={size} height={size}
-      viewBox="0 0 24 24" fill="none"
-      stroke="currentColor" strokeWidth="2"
-      strokeLinecap="round" strokeLinejoin="round"
-    >
-      <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
-      <circle cx="12" cy="7" r="4" />
-    </svg>
   );
 }
