@@ -230,8 +230,12 @@ export default function JudgeDashboard({ user, forcedProposalId }: JudgeDashboar
 
     try {
       setIsNavigating(true);
-      const res  = await fetch(`/api/proposals/${id}?judgeId=${user.id}&role=${user.role}`);
-      const data = await res.json();
+       const res = await fetch(`/api/proposals/${id}?judgeId=${user.id}&role=${user.role}`);
+if (!res.ok) {
+  alert('학생 정보를 불러오지 못했습니다.');
+  return;
+}
+const data = await res.json();
 
       if (requestId !== latestRequestId.current) return;
 
@@ -290,9 +294,10 @@ export default function JudgeDashboard({ user, forcedProposalId }: JudgeDashboar
       });
 
       if (!response.ok) {
-        alert('심사 저장에 실패했습니다. 다시 시도해주세요.');
-        return;
-      }
+  const errorData = await response.json().catch(() => null);
+  alert(errorData?.error || '심사 저장에 실패했습니다. 다시 시도해주세요.');
+  return;
+}
 
       localStorage.removeItem(`eval_draft_${user.id}_${selectedProposal.id}`);
       setIsEditing(false);
@@ -654,7 +659,7 @@ export default function JudgeDashboard({ user, forcedProposalId }: JudgeDashboar
                           </button>
                           <button
                             type="submit"
-                            disabled={isLocked}
+                            disabled={isSavingEvaluation}
                             className="flex-[2] bg-black text-white py-4 rounded-xl font-bold hover:bg-black/90 transition-all disabled:opacity-50 shadow-lg shadow-black/10"
                           >
                             {isSavingEvaluation ? (
