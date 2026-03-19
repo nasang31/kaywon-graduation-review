@@ -3,11 +3,11 @@ import express from "express";
 import { createServer as createViteServer } from "vite";
 import pg from "pg";
 import path from "path";
-import fs from "fs";
 import multer from "multer";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import cookieParser from "cookie-parser";
+import { createClient } from "@supabase/supabase-js";
 
 const { Pool } = pg;
 
@@ -144,33 +144,72 @@ function average(values: Array<number | null | undefined>) {
 app.use(express.json({ limit: "50mb" }));
 app.use(cookieParser());
 
-const uploadDir = path.join(process.cwd(), "uploads");
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir);
-}
-app.use("/uploads", express.static(uploadDir));
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const SUPABASE_STORAGE_BUCKET = process.env.SUPABASE_STORAGE_BUCKET || "work-images";
 
-const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, uploadDir),
-  filename: (_req, file, cb) => {
-    const ext = path.extname(file.originalname);
-    const name = path.basename(file.originalname, ext).replace(/[^a-z0-9]/gi, "_").toLowerCase();
-    cb(null, `${Date.now()}-${name}${ext}`);
-  },
-});
+if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+  console.warn("[upload] Supabase Storage 환경변수가 없습니다. 업로드 기능이 동작하지 않을 수 있습니다.");
+}
+
+const supabase = createClient(
+  SUPABASE_URL || "",
+  SUPABASE_SERVICE_ROLE_KEY || "",
+  {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+  }
+);
 
 const upload = multer({
-  storage,
+  storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
-    const allowedMimeTypes = /image\/(jpeg|jpg|png|gif|webp|heic|heif)/;
-    const allowedExtensions = /\.(jpg|jpeg|png|gif|webp|heic|heif)$/i;
+    const allowedMimeTypes = /image\/(jpeg|jpg|png|gif)/;
+    const allowedExtensions = /\.(jpg|jpeg|png|gif)$/i;
     const mimetype = allowedMimeTypes.test(file.mimetype);
     const extname = allowedExtensions.test(path.extname(file.originalname).toLowerCase());
+
     if (mimetype || extname) return cb(null, true);
-    cb(new Error(`허용되지 않는 파일 형식입니다. (MIME: ${file.mimetype}, Ext: ${path.extname(file.originalname)})`));
+
+    cb(
+      new Error(
+        `허용되지 않는 파일 형식입니다. (MIME: ${file.mimetype}, Ext: ${path.extname(file.originalname)})`
+      )
+    );
   },
 });
+
+function sanitizeFilename(filename: string) {
+  const ext = path.extname(filename).toLowerCase();
+  const base = path.basename(filename, ext).replace(/[^a-z0-9]/gi, "_").toLowerCase();
+  return `${Date.now()}-${base}${ext}`;
+}
+
+async function uploadImageToSupabase(file: Express.Multer.File) {
+  const fileName = sanitizeFilename(file.originalname);
+  const filePath = `uploads/${fileName}`;
+
+  const { error } = await supabase.storage
+    .from(SUPABASE_STORAGE_BUCKET)
+    .upload(filePath, file.buffer, {
+      contentType: file.mimetype,
+      upsert: false,
+      cacheControl: "3600",
+    });
+
+  if (error) {
+    throw error;
+  }
+
+  const { data } = supabase.storage
+    .from(SUPABASE_STORAGE_BUCKET)
+    .getPublicUrl(filePath);
+
+  return data.publicUrl;
+}
 
 const authenticate = (req: any, res: any, next: any) => {
   const token = req.cookies.token;
@@ -1028,22 +1067,39 @@ app.get("/api/admin/stats/:roundNumber", authenticate, authorize(["admin"]), asy
       avgWork2: avgWork2.toFixed(2),
       avgWork3: avgWork3.toFixed(2),
     });
+}
+
+  res.json(stats);
+});
 
 // Image Upload
 app.post("/api/upload", authenticate, (req, res) => {
-  upload.single("image")(req, res, (err) => {
-    if (err) {
-      if (err instanceof multer.MulterError && err.code === "LIMIT_FILE_SIZE") {
-        return res.status(400).json({ error: "이미지 용량이 너무 큽니다. (최대 10MB)" });
+  upload.single("image")(req, res, async (err) => {
+    try {
+      if (err) {
+        if (err instanceof multer.MulterError && err.code === "LIMIT_FILE_SIZE") {
+          return res.status(400).json({ error: "이미지 용량이 너무 큽니다. (최대 10MB)" });
+        }
+        return res.status(400).json({ error: err.message || "업로드 중 오류가 발생했습니다." });
       }
-      return res.status(400).json({ error: err.message || "업로드 중 오류가 발생했습니다." });
-    }
 
-    if (!req.file) {
-      return res.status(400).json({ error: "파일이 없습니다." });
-    }
+      if (!req.file) {
+        return res.status(400).json({ error: "파일이 없습니다." });
+      }
 
-    res.json({ url: `/uploads/${req.file.filename}` });
+      if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+        return res.status(500).json({ error: "Supabase Storage 환경변수가 설정되지 않았습니다." });
+      }
+
+      const publicUrl = await uploadImageToSupabase(req.file);
+
+      return res.json({ url: publicUrl });
+    } catch (error: any) {
+      console.error("[upload] supabase upload error:", error);
+      return res.status(500).json({
+        error: error?.message || "Supabase 업로드 중 오류가 발생했습니다.",
+      });
+    }
   });
 });
 
