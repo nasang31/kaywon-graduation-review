@@ -67,26 +67,19 @@ function calcMyScore(s: any): number {
   });
 }
 
-// ── 전체 평가자 평균 (0점 제외) ──────────────────────────────────
+// ── 전체 평가자 평균 (평가자 1인 평균의 평균) ─────────────────────
 function calculateAverage(evals: any[]): string {
   if (!evals || evals.length === 0) return '0.00';
-  let totalScore = 0;
-  let totalCount = 0;
-  for (const e of evals) {
-    const items = [
-      GRADE_SCORES[e.text_grade  as keyof typeof GRADE_SCORES],
-      GRADE_SCORES[e.work1_grade as keyof typeof GRADE_SCORES],
-      GRADE_SCORES[e.work2_grade as keyof typeof GRADE_SCORES],
-      GRADE_SCORES[e.work3_grade as keyof typeof GRADE_SCORES],
-    ];
-    for (const score of items) {
-      if (typeof score === 'number' && score > 0) {
-        totalScore += score;
-        totalCount++;
-      }
-    }
-  }
-  return totalCount === 0 ? '0.00' : (totalScore / totalCount).toFixed(2);
+
+  const judgeScores = evals
+    .map(calcJudgeScore)
+    .filter(score => score > 0);
+
+  if (judgeScores.length === 0) return '0.00';
+
+  return (
+    judgeScores.reduce((sum, score) => sum + score, 0) / judgeScores.length
+  ).toFixed(2);
 }
 
 // ── draft JSON → evaluation 안전 변환 ────────────────────────────
@@ -149,24 +142,39 @@ export default function JudgeDashboard({ user, forcedProposalId }: JudgeDashboar
   };
 
   // ── 목록 복귀 시 스크롤 복원 ────────────────────────────────────
-  useEffect(() => {
-    if (!selectedProposal && lastSelectedId) {
-      let frames = 0;
-      const scroll = () => {
-        const el = document.getElementById(`student-card-${lastSelectedId}`);
-        if (el) {
-          el.scrollIntoView({ behavior: 'auto', block: 'center' });
-          if (listScrollPos > 0 && frames === 0) window.scrollTo(0, listScrollPos);
-        } else if (listScrollPos > 0) {
-          window.scrollTo(0, listScrollPos);
-        }
-        frames++;
-        if (frames < 10) requestAnimationFrame(scroll);
-      };
-      const t = setTimeout(() => requestAnimationFrame(scroll), 50);
-      return () => clearTimeout(t);
-    }
-  }, [selectedProposal, lastSelectedId, listScrollPos]);
+useEffect(() => {
+  if (!selectedProposal && lastSelectedId) {
+    let frames = 0;
+    let rafId = 0;
+    let cancelled = false;
+
+    const scroll = () => {
+      if (cancelled) return;
+
+      const el = document.getElementById(`student-card-${lastSelectedId}`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'auto', block: 'center' });
+      } else if (listScrollPos > 0) {
+        window.scrollTo(0, listScrollPos);
+      }
+
+      frames++;
+      if (frames < 10) {
+        rafId = requestAnimationFrame(scroll);
+      }
+    };
+
+    const t = setTimeout(() => {
+      rafId = requestAnimationFrame(scroll);
+    }, 50);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+      cancelAnimationFrame(rafId);
+    };
+  }
+}, [selectedProposal, lastSelectedId, listScrollPos]);
 
   // ── 이미지 줌 시 body 스크롤 잠금 ──────────────────────────────
   useEffect(() => {
@@ -254,7 +262,11 @@ const data = await res.json();
         setIsEditing(false);
       } else {
         const raw = localStorage.getItem(`eval_draft_${user.id}_${id}`);
-        setEvaluation(raw ? (parseDraft(raw) ?? EMPTY_EVALUATION) : EMPTY_EVALUATION);
+        setEvaluation(
+  raw
+    ? (parseDraft(raw) ?? { ...EMPTY_EVALUATION })
+    : { ...EMPTY_EVALUATION }
+);
         setIsEditing(true);
       }
     } catch (err) {
@@ -266,6 +278,36 @@ const data = await res.json();
       }
     }
   };
+
+  const refreshCurrentProposal = async (proposalId: number | string) => {
+  try {
+    const res = await fetch(
+      `/api/proposals/${proposalId}?judgeId=${user.id}&role=${user.role}`
+    );
+    if (!res.ok) return;
+
+    const data = await res.json();
+    setSelectedProposal(data);
+
+    const myEval = data.evaluations?.find((e: any) => e.judge_id === user.id);
+
+    if (myEval) {
+      setEvaluation({
+        text_grade: myEval.text_grade || '',
+        work1_grade: myEval.work1_grade || '',
+        work2_grade: myEval.work2_grade || '',
+        work3_grade: myEval.work3_grade || '',
+        comment: myEval.comment || '',
+      });
+      setIsEditing(false);
+    } else {
+      setEvaluation({ ...EMPTY_EVALUATION });
+      setIsEditing(true);
+    }
+  } catch (err) {
+    console.error('refreshCurrentProposal failed:', err);
+  }
+};
 
   const handleSubmitEvaluation = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -301,8 +343,10 @@ const data = await res.json();
 
       localStorage.removeItem(`eval_draft_${user.id}_${selectedProposal.id}`);
       setIsEditing(false);
-      await fetchStudents();
-      await handleSelectStudent(selectedProposal.id);
+      await Promise.all([
+  fetchStudents(),
+  refreshCurrentProposal(selectedProposal.id),
+]);
     } catch (err) {
       console.error(err);
       alert('네트워크 오류가 발생했습니다.');
@@ -325,9 +369,11 @@ const data = await res.json();
       }
       alert('심사가 취소되었습니다.');
       localStorage.removeItem(`eval_draft_${user.id}_${selectedProposal.id}`);
-      setEvaluation(EMPTY_EVALUATION);
-      await fetchStudents();
-      await handleSelectStudent(selectedProposal.id);
+      setEvaluation({ ...EMPTY_EVALUATION });
+      await Promise.all([
+  fetchStudents(),
+  refreshCurrentProposal(selectedProposal.id),
+]);
     } catch (err) {
       console.error(err);
       alert('네트워크 오류가 발생했습니다.');
@@ -857,6 +903,10 @@ const data = await res.json();
         <div className={`flex-1 grid grid-cols-1 md:grid-cols-2 ${showRanking ? 'lg:grid-cols-2' : 'lg:grid-cols-3'} gap-6`}>
           {students.map(student => {
             const myScore = calcMyScore(student);
+  const isMyEvaluationCompleted =
+    student.my_is_final === true ||
+    student.my_is_final === 1 ||
+    student.my_is_final === '1';
             return (
               <motion.div
                 key={student.id}
@@ -871,8 +921,8 @@ const data = await res.json();
                       <UserIcon size={24} />
                     </div>
                     <div className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest
-                      ${student.my_eval_count > 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
-                      {student.my_eval_count > 0 ? '심사 완료' : '심사 대기'}
+                      ${isMyEvaluationCompleted ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                      {isMyEvaluationCompleted ? '심사 완료' : '심사 대기'}
                     </div>
                   </div>
                   <h3 className="text-xl font-bold mb-1 line-clamp-1">{student.title}</h3>
@@ -881,7 +931,7 @@ const data = await res.json();
                     <span className="flex items-center gap-1">
                       <MessageSquare size={14} /> {student.total_eval_count} 의견
                     </span>
-                    {student.my_eval_count > 0 && (
+                    {isMyEvaluationCompleted && (
                       <span className="text-emerald-600 font-bold">
                         내 점수: {myScore.toFixed(1)}
                       </span>
@@ -909,39 +959,48 @@ const data = await res.json();
                 (다른 교수님의 점수는 반영되지 않습니다.)
               </p>
               <div className="space-y-3">
-                {students
-                  .filter(s => s.my_eval_count > 0)
-                  .map(s => ({ ...s, myScore: calcMyScore(s) }))
-                  .sort((a, b) => b.myScore - a.myScore)
-                  .map((student, idx) => (
-                    <div
-                      key={student.id}
-                      onClick={() => handleSelectStudent(student.id)}
-                      className="flex items-center gap-3 p-3 rounded-2xl hover:bg-black/5 transition-all cursor-pointer group"
-                    >
-                      <div className={`w-6 h-6 rounded-lg flex items-center justify-center text-[10px] font-bold
-                        ${idx === 0 ? 'bg-amber-400 text-white'
-                        : idx === 1 ? 'bg-slate-300 text-white'
-                        : idx === 2 ? 'bg-orange-300 text-white'
-                        : 'bg-black/5 text-black/40'}`}>
-                        {idx + 1}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="text-xs font-bold text-black group-hover:text-blue-600 transition-colors truncate">
-                          {student.student_name}
-                        </div>
-                        <div className="text-[10px] text-black/40 truncate">{student.title}</div>
-                      </div>
-                      <div className="text-xs font-bold text-black/80">{student.myScore.toFixed(1)}</div>
-                    </div>
-                  ))}
-                {students.filter(s => s.my_eval_count > 0).length === 0 && (
-                  <div className="text-center py-12 text-black/20">
-                    <p className="text-xs font-medium">아직 평가한 학생이 없습니다.</p>
-                  </div>
-                )}
-              </div>
-            </section>
+  {students
+    .filter(s =>
+      s.my_is_final === true ||
+      s.my_is_final === 1 ||
+      s.my_is_final === '1'
+    )
+    .map(s => ({ ...s, myScore: calcMyScore(s) }))
+    .sort((a, b) => b.myScore - a.myScore)
+    .map((student, idx) => (
+      <div
+        key={student.id}
+        onClick={() => handleSelectStudent(student.id)}
+        className="flex items-center gap-3 p-3 rounded-2xl hover:bg-black/5 transition-all cursor-pointer group"
+      >
+        <div className={`w-6 h-6 rounded-lg flex items-center justify-center text-[10px] font-bold
+          ${idx === 0 ? 'bg-amber-400 text-white'
+          : idx === 1 ? 'bg-slate-300 text-white'
+          : idx === 2 ? 'bg-orange-300 text-white'
+          : 'bg-black/5 text-black/40'}`}>
+          {idx + 1}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="text-xs font-bold text-black group-hover:text-blue-600 transition-colors truncate">
+            {student.student_name}
+          </div>
+          <div className="text-[10px] text-black/40 truncate">{student.title}</div>
+        </div>
+        <div className="text-xs font-bold text-black/80">{student.myScore.toFixed(1)}</div>
+      </div>
+    ))}
+
+  {students.filter(s =>
+    s.my_is_final === true ||
+    s.my_is_final === 1 ||
+    s.my_is_final === '1'
+  ).length === 0 && (
+    <div className="text-center py-12 text-black/20">
+      <p className="text-xs font-medium">아직 평가한 학생이 없습니다.</p>
+    </div>
+  )}
+</div>
+                      </section>
           </aside>
         )}
       </div>
