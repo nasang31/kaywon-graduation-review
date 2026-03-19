@@ -825,6 +825,10 @@ app.post("/api/evaluations", authenticate, authorize(["judge", "admin"]), async 
     return res.status(400).json({ error: "proposal 또는 judge 정보가 없습니다." });
   }
 
+  if (!text_grade || !work1_grade || !work2_grade || !work3_grade) {
+  return res.status(400).json({ error: "4개 항목을 모두 입력해야 저장할 수 있습니다." });
+  }
+  
   if (req.user.role === "judge" && req.user.id !== judgeId) {
     return res.status(403).json({ error: "권한이 없습니다." });
   }
