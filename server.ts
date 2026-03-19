@@ -974,13 +974,13 @@ app.get("/api/admin/stats/:roundNumber", authenticate, authorize(["admin"]), asy
     ) as any[];
 
     // 핵심: 최종 저장 + 4개 항목이 모두 입력된 평가만 통계에 포함
-    const finalizedEvals = evals.filter((e: any) =>
-      isFinalTrue(e.is_final) &&
-      e.text_grade &&
-      e.work1_grade &&
-      e.work2_grade &&
-      e.work3_grade
-    );
+   const finalizedEvals = evals.filter((e: any) =>
+  isFinalTrue(e.is_final) &&
+  e.text_grade &&
+  e.work1_grade &&
+  e.work2_grade &&
+  e.work3_grade
+);
 
     const processedEvals = finalizedEvals.map((e) => {
       const st = scoreOrNull(e.text_grade);
