@@ -489,6 +489,44 @@ export default function JudgeDashboard({ user, forcedProposalId }: JudgeDashboar
     setIsSavingEvaluation(false);
   }
 };
+
+  const handleAdminResetProposal = async () => {
+  if (!selectedProposal) return;
+
+  const ok = window.confirm(
+    `${selectedProposal.name} 학생의 ${selectedRound}차 제출안을 초기화하시겠습니까?\n\n` +
+    `작품, 이미지, 교수 평가가 함께 삭제되며 복구할 수 없습니다.`
+  );
+
+  if (!ok) return;
+
+  setIsSavingEvaluation(true);
+
+  try {
+    const res = await fetch(
+      `/api/admin/proposals/${selectedProposal.id}/reset`,
+      { method: 'DELETE' }
+    );
+
+    const data = await res.json().catch(() => null);
+
+    if (!res.ok) {
+      alert(data?.error || '제출안 초기화에 실패했습니다.');
+      return;
+    }
+
+    alert('해당 차수 제출안이 초기화되었습니다.');
+
+    await fetchStudents();
+    setPreviousProposal(null);
+    setSelectedProposal(null);
+  } catch (err) {
+    console.error(err);
+    alert('네트워크 오류가 발생했습니다.');
+  } finally {
+    setIsSavingEvaluation(false);
+  }
+};
   
   const handlePasswordChange = async (e: React.FormEvent) => {
   e.preventDefault();
@@ -583,16 +621,27 @@ export default function JudgeDashboard({ user, forcedProposalId }: JudgeDashboar
             </section>
           ) : (
             <section className="bg-white p-8 rounded-3xl shadow-sm border border-black/5">
-              <div className="flex justify-between items-start mb-8 border-b border-black/5 pb-6">
-                <div>
-                  <h2 className="text-4xl font-black tracking-tight mb-4">{selectedProposal.name}</h2>
-                  <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm font-bold">
-                    <span>학번: {selectedProposal.studentId || selectedProposal.student_id}</span>
-                    <span className="w-px h-3 bg-black/20" />
-                    <span>희망진로: {selectedProposal.careerPath || selectedProposal.career_path || '미입력'}</span>
-                  </div>
-                </div>
-              </div>
+               <div className="flex justify-between items-start mb-8 border-b border-black/5 pb-6 gap-4">
+  <div>
+    <h2 className="text-4xl font-black tracking-tight mb-4">{selectedProposal.name}</h2>
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm font-bold">
+      <span>학번: {selectedProposal.studentId || selectedProposal.student_id}</span>
+      <span className="w-px h-3 bg-black/20" />
+      <span>희망진로: {selectedProposal.careerPath || selectedProposal.career_path || '미입력'}</span>
+    </div>
+  </div>
+
+  {user.role === 'admin' && (
+    <button
+      type="button"
+      onClick={handleAdminResetProposal}
+      disabled={isSavingEvaluation}
+      className="px-4 py-2 bg-red-50 text-red-700 border border-red-100 rounded-xl text-xs font-bold hover:bg-red-100 transition-all disabled:opacity-50"
+    >
+      해당 차수 초기화
+    </button>
+  )}
+</div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
                 <div className="space-y-8">
                   {([
