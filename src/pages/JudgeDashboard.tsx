@@ -450,6 +450,46 @@ export default function JudgeDashboard({ user, forcedProposalId }: JudgeDashboar
     }
   };
 
+  const handleAdminDeleteEvaluation = async (judgeEvaluation: any) => {
+  if (!selectedProposal) return;
+
+  const ok = window.confirm(
+    `${selectedProposal.name} 학생의 ${selectedRound}차 심사에서\n` +
+    `${judgeEvaluation.judge_name} 교수 평가를 삭제하시겠습니까?\n\n` +
+    `삭제 후 복구할 수 없습니다.`
+  );
+
+  if (!ok) return;
+
+  setIsSavingEvaluation(true);
+
+  try {
+    const res = await fetch(
+      `/api/evaluations/${selectedProposal.id}/${judgeEvaluation.judge_id}`,
+      { method: 'DELETE' }
+    );
+
+    const data = await res.json().catch(() => null);
+
+    if (!res.ok) {
+      alert(data?.error || '평가 삭제에 실패했습니다.');
+      return;
+    }
+
+    alert('해당 교수 평가가 삭제되었습니다.');
+
+    await Promise.all([
+      fetchStudents(),
+      refreshCurrentProposal(selectedProposal.id),
+    ]);
+  } catch (err) {
+    console.error(err);
+    alert('네트워크 오류가 발생했습니다.');
+  } finally {
+    setIsSavingEvaluation(false);
+  }
+};
+  
   const handlePasswordChange = async (e: React.FormEvent) => {
   e.preventDefault();
 
@@ -871,29 +911,44 @@ export default function JudgeDashboard({ user, forcedProposalId }: JudgeDashboar
                     </span>
                   </h3>
                   <div className="space-y-4">
-                    {selectedProposal.evaluations && selectedProposal.evaluations.length > 0 ? (
-                      selectedProposal.evaluations.map((e: any, i: number) => (
-                        <div key={i} className="p-4 bg-black/[0.02] rounded-2xl border border-black/5">
-                          <div className="flex justify-between items-center mb-2">
-                            <span className="text-sm font-bold">{e.judge_name}</span>
-                            <span className="text-xs font-bold text-amber-600">
-                              {calcJudgeScore(e).toFixed(1)}점
-                            </span>
-                          </div>
-                          <div className="grid grid-cols-2 gap-2 mb-3 text-[10px] text-black/40">
-                            <span>텍스트: {e.text_grade}</span>
-                            <span>작품1: {e.work1_grade}</span>
-                            <span>작품2: {e.work2_grade}</span>
-                            <span>작품3: {e.work3_grade}</span>
-                          </div>
-                          <p className="text-xs text-black/60 italic leading-relaxed">
-                            "{e.comment || '의견 없음'}"
-                          </p>
-                        </div>
-                      ))
-                    ) : (
-                      <p className="text-center py-8 text-black/20 text-sm">아직 등록된 평가가 없습니다.</p>
-                    )}
+                     {(selectedProposal.evaluations?.length ?? 0) > 0 ? (
+  selectedProposal.evaluations.map((e: any, i: number) => (
+    <div key={i} className="p-4 bg-black/[0.02] rounded-2xl border border-black/5">
+      <div className="flex justify-between items-start mb-2 gap-3">
+        <div>
+          <span className="text-sm font-bold block">{e.judge_name}</span>
+          <span className="text-xs font-bold text-amber-600">
+            {calcJudgeScore(e).toFixed(1)}점
+          </span>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => handleAdminDeleteEvaluation(e)}
+          disabled={isSavingEvaluation}
+          className="px-3 py-1.5 bg-red-50 text-red-600 border border-red-100 rounded-xl text-[11px] font-bold hover:bg-red-100 transition-all disabled:opacity-50"
+        >
+          이 평가만 삭제
+        </button>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2 mb-3 text-[10px] text-black/40">
+        <span>텍스트: {e.text_grade}</span>
+        <span>작품1: {e.work1_grade}</span>
+        <span>작품2: {e.work2_grade}</span>
+        <span>작품3: {e.work3_grade}</span>
+      </div>
+
+      <p className="text-xs text-black/60 italic leading-relaxed">
+        "{e.comment || '의견 없음'}"
+      </p>
+    </div>
+  ))
+) : (
+  <p className="text-center py-8 text-black/20 text-sm">
+    아직 등록된 평가가 없습니다.
+  </p>
+)}
                   </div>
                 </section>
               )}
