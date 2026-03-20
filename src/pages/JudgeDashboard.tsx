@@ -586,22 +586,7 @@ export default function JudgeDashboard({ user, forcedProposalId }: JudgeDashboar
             </section>
           )}
 
-          {selectedRound > 1 && previousProposal && (
-            <section className="bg-blue-50 border border-blue-100 rounded-3xl p-6">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-bold text-blue-800">
-                  {selectedRound - 1}차 제출안 참고
-                </h3>
-                <button
-                  type="button"
-                  onClick={() => setShowPreviousProposal(v => !v)}
-                  className="px-3 py-1.5 bg-white border border-blue-100 rounded-xl text-xs font-bold hover:bg-blue-100 transition-all"
-                >
-                  {showPreviousProposal ? '숨기기' : '보기'}
-                </button>
-              </div>
-
-              {selectedRound > 1 && previousProposal && (
+{selectedRound > 1 && previousProposal && (
   <section className="bg-blue-50 border border-blue-100 rounded-3xl p-6">
     <div className="flex items-center justify-between mb-4">
       <h3 className="text-lg font-bold text-blue-800">
@@ -618,9 +603,15 @@ export default function JudgeDashboard({ user, forcedProposalId }: JudgeDashboar
 
     {showPreviousProposal && (
       <div className="space-y-5 text-sm text-black/70">
-        <div><span className="font-bold">텍스트명:</span> {previousProposal.title || '-'}</div>
-        <div><span className="font-bold">작가명:</span> {previousProposal.author || '-'}</div>
-        <div><span className="font-bold">주제:</span> {previousProposal.subject || '-'}</div>
+        <div>
+          <span className="font-bold">텍스트명:</span> {previousProposal.title || '-'}
+        </div>
+        <div>
+          <span className="font-bold">작가명:</span> {previousProposal.author || '-'}
+        </div>
+        <div>
+          <span className="font-bold">주제:</span> {previousProposal.subject || '-'}
+        </div>
 
         {[1, 2, 3].map((num) => {
           const work = (previousProposal.works || []).find(
@@ -628,7 +619,10 @@ export default function JudgeDashboard({ user, forcedProposalId }: JudgeDashboar
           );
 
           return (
-            <div key={num} className="pt-2 border-t border-blue-100 first:border-t-0 first:pt-0">
+            <div
+              key={num}
+              className="pt-2 border-t border-blue-100 first:border-t-0 first:pt-0"
+            >
               <div className="font-bold text-blue-900 mb-2">
                 작품{num}: {work?.title || '-'}
               </div>
