@@ -968,21 +968,52 @@ app.post("/api/evaluations", authenticate, authorize(["judge", "admin"]), async 
 });
 
 app.delete("/api/evaluations/:proposalId/:judgeId", authenticate, authorize(["judge", "admin"]), async (req: any, res) => {
-  if (req.user.role === "admin") {
-    return res.status(403).json({ error: "관리자는 평가를 삭제할 수 없습니다." });
-  }
+  const { proposalId, judgeId } = req.params;
 
-  if (req.user.role === "judge" && req.user.id !== req.params.judgeId) {
+  // 교수는 자기 평가만 삭제 가능
+  if (req.user.role === "judge" && req.user.id !== judgeId) {
     return res.status(403).json({ error: "권한이 없습니다." });
   }
 
   try {
-    await db.run("DELETE FROM evaluations WHERE proposal_id = ? AND judge_id = ? AND (is_final = false OR is_final IS NULL)", [
-      req.params.proposalId,
-      req.params.judgeId,
-    ]);
+    const evaluation = await db.get(
+      `
+      SELECT e.*, p.student_id, p.name, p.round_number
+      FROM evaluations e
+      JOIN proposals p ON e.proposal_id = p.id
+      WHERE e.proposal_id = ? AND e.judge_id = ?
+      `,
+      [proposalId, judgeId]
+    ) as any;
+
+    if (!evaluation) {
+      return res.status(404).json({ error: "삭제할 평가를 찾을 수 없습니다." });
+    }
+
+    // 교수는 최종 확정된 평가 삭제 불가, 관리자는 삭제 가능
+    if (req.user.role === "judge" && evaluation.is_final) {
+      return res.status(403).json({ error: "최종 확정된 평가는 삭제할 수 없습니다." });
+    }
+
+    await db.run(
+      "DELETE FROM evaluations WHERE proposal_id = ? AND judge_id = ?",
+      [proposalId, judgeId]
+    );
+
+    console.log("[ADMIN/JUDGE DELETE EVALUATION]", {
+      deletedBy: req.user.id,
+      deletedByRole: req.user.role,
+      proposalId,
+      judgeId,
+      studentId: evaluation.student_id,
+      studentName: evaluation.name,
+      roundNumber: evaluation.round_number,
+      deletedAt: new Date().toISOString(),
+    });
+
     res.json({ success: true });
   } catch (err: any) {
+    console.error("[DELETE EVALUATION ERROR]", err);
     res.status(500).json({ error: err.message });
   }
 });
