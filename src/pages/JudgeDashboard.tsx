@@ -601,28 +601,47 @@ export default function JudgeDashboard({ user, forcedProposalId }: JudgeDashboar
                 </button>
               </div>
 
-              {showPreviousProposal && (
-                <div className="space-y-3 text-sm text-black/70">
-                  <div><span className="font-bold">텍스트명:</span> {previousProposal.title || '-'}</div>
-                  <div><span className="font-bold">작가명:</span> {previousProposal.author || '-'}</div>
-                  <div><span className="font-bold">장르:</span> {previousProposal.genre || '-'}</div>
-                  <div><span className="font-bold">주제:</span> {previousProposal.subject || '-'}</div>
-                  <div><span className="font-bold">기획 의도:</span> {previousProposal.reason || '-'}</div>
+              {selectedRound > 1 && previousProposal && (
+  <section className="bg-blue-50 border border-blue-100 rounded-3xl p-6">
+    <div className="flex items-center justify-between mb-4">
+      <h3 className="text-lg font-bold text-blue-800">
+        {selectedRound - 1}차 제출안 참고
+      </h3>
+      <button
+        type="button"
+        onClick={() => setShowPreviousProposal(v => !v)}
+        className="px-3 py-1.5 bg-white border border-blue-100 rounded-xl text-xs font-bold hover:bg-blue-100 transition-all"
+      >
+        {showPreviousProposal ? '숨기기' : '보기'}
+      </button>
+    </div>
 
-                  <div className="pt-2">
-                    <div className="font-bold mb-2">작품 제목</div>
-                    <ul className="list-disc pl-5 space-y-1">
-                      {(previousProposal.works || []).map((w: any, idx: number) => (
-                        <li key={idx}>
-                          {w.title || `작품 ${w.work_number ?? idx + 1}`}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                </div>
-              )}
-            </section>
-          )}
+    {showPreviousProposal && (
+      <div className="space-y-5 text-sm text-black/70">
+        <div><span className="font-bold">텍스트명:</span> {previousProposal.title || '-'}</div>
+        <div><span className="font-bold">작가명:</span> {previousProposal.author || '-'}</div>
+        <div><span className="font-bold">주제:</span> {previousProposal.subject || '-'}</div>
+
+        {[1, 2, 3].map((num) => {
+          const work = (previousProposal.works || []).find(
+            (w: any) => Number(w.work_number ?? w.workNumber) === num
+          );
+
+          return (
+            <div key={num} className="pt-2 border-t border-blue-100 first:border-t-0 first:pt-0">
+              <div className="font-bold text-blue-900 mb-2">
+                작품{num}: {work?.title || '-'}
+              </div>
+              <div>
+                <span className="font-bold">작업개요:</span> {work?.summary || '-'}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    )}
+  </section>
+)}
 
           {selectedProposal.is_submitted && (
             <div className="space-y-8">
