@@ -11,6 +11,10 @@ interface StudentDashboardProps {
 export default function StudentDashboard({ user }: StudentDashboardProps) {
   const [selectedRound, setSelectedRound] = useState(1);
   const [rounds, setRounds] = useState<any[]>([]);
+  const [previousProposal, setPreviousProposal] = useState<any | null>(null);
+  const [showPreviousProposal, setShowPreviousProposal] = useState(false);
+  const didSetInitialRound = useRef(false);
+
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [passwords, setPasswords] = useState({ current: '', new: '', confirm: '' });
   const [proposal, setProposal] = useState<Partial<Proposal>>({
@@ -66,9 +70,10 @@ export default function StudentDashboard({ user }: StudentDashboardProps) {
     if (isInitialMount.current) {
       isInitialMount.current = false;
     }
-    fetchProposal();
-  }, [user.id, selectedRound]);
-
+     fetchProposal();
+  fetchPreviousProposal();
+}, [user.id, selectedRound]);
+  
   // Auto-save to localStorage
   useEffect(() => {
     if (fetching || !proposal.userId) return;
@@ -94,20 +99,28 @@ export default function StudentDashboard({ user }: StudentDashboardProps) {
   }, [proposal, isLocked, fetching]);
 
   const fetchRounds = async () => {
-    try {
-      const res = await fetch('/api/admin/rounds');
-      const data = await res.json();
-      if (Array.isArray(data)) {
-        setRounds(data);
-      } else {
-        console.error('Rounds data is not an array:', data);
-        setRounds([]);
+  try {
+    const res = await fetch('/api/admin/rounds');
+    const data = await res.json();
+
+    if (Array.isArray(data)) {
+      setRounds(data);
+
+      const activeRound = data.find((r: any) => Number(r.is_open) === 1);
+
+      if (activeRound && !didSetInitialRound.current) {
+        didSetInitialRound.current = true;
+        setSelectedRound(activeRound.round_number);
       }
-    } catch (err) {
-      console.error('Failed to fetch rounds:', err);
+    } else {
+      console.error('Rounds data is not an array:', data);
       setRounds([]);
     }
-  };
+  } catch (err) {
+    console.error('Failed to fetch rounds:', err);
+    setRounds([]);
+  }
+};
 
   const fetchProposal = async () => {
     setFetching(true);
@@ -338,69 +351,179 @@ export default function StudentDashboard({ user }: StudentDashboardProps) {
     setProposal({ ...proposal, works: newWorks });
   };
 
-  const handlePasswordChange = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (passwords.new !== passwords.confirm) {
-      alert('새 비밀번호가 일치하지 않습니다.');
-      return;
-    }
-    try {
-      const res = await fetch('/api/change-password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: user.id, newPassword: passwords.new }),
+  const fetchPreviousProposal = async () => {
+  if (selectedRound <= 1) {
+    setPreviousProposal(null);
+    return;
+  }
+
+  try {
+    const res = await fetch(`/api/proposals/reference/${user.id}/${selectedRound - 1}`);
+    const data = await res.json();
+    setPreviousProposal(data || null);
+  } catch (err) {
+    console.error('Failed to fetch previous proposal', err);
+    setPreviousProposal(null);
+  }
+};
+
+const handleCopyFromPrevious = () => {
+  if (!previousProposal || isLocked) return;
+
+  setShowConfirmModal({
+    show: true,
+    title: `${selectedRound - 1}차 내용 불러오기`,
+    message: `${selectedRound - 1}차 내용을 현재 ${selectedRound}차 작성란에 복사합니다. 현재 작성 중인 내용은 덮어써집니다.`,
+    onConfirm: () => {
+      const copiedWorks: Work[] = [1, 2, 3].map((num) => {
+        const found = previousProposal.works?.find((w: any) => Number(w.work_number ?? w.workNumber) === num);
+        return {
+          workNumber: num,
+          title: found?.title || '',
+          category: found?.category || '공간설계',
+          summary: found?.summary || '',
+          keywords: found?.keywords || '',
+          purpose: found?.purpose || '',
+          effect: found?.effect || '',
+          images: Array.isArray(found?.images) ? found.images : [],
+        };
       });
-      if (res.ok) {
-        alert('비밀번호가 변경되었습니다.');
-        setShowPasswordModal(false);
-        setPasswords({ current: '', new: '', confirm: '' });
-      }
-    } catch (err) {
-      alert('비밀번호 변경에 실패했습니다.');
+
+      setProposal((prev) => ({
+        ...prev,
+        userId: user.id,
+        roundNumber: selectedRound,
+        studentId: user.student_id || '',
+        name: user.name,
+        careerPath: previousProposal.career_path || '',
+        title: previousProposal.title || '',
+        author: previousProposal.author || '',
+        genre: previousProposal.genre || '',
+        plot: previousProposal.plot || '',
+        subject: previousProposal.subject || '',
+        reason: previousProposal.reason || '',
+        is_submitted: false,
+        is_evaluated: false,
+        works: copiedWorks,
+      }));
+
+      setShowConfirmModal(prev => ({ ...prev, show: false }));
+    },
+    isDanger: false
+  });
+};
+  
+const handlePasswordChange = async (e: React.FormEvent) => {
+  e.preventDefault();
+  if (passwords.new !== passwords.confirm) {
+    alert('새 비밀번호가 일치하지 않습니다.');
+    return;
+  }
+  try {
+    const res = await fetch('/api/change-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: user.id, newPassword: passwords.new }),
+    });
+    if (res.ok) {
+      alert('비밀번호가 변경되었습니다.');
+      setShowPasswordModal(false);
+      setPasswords({ current: '', new: '', confirm: '' });
     }
-  };
+  } catch (err) {
+    alert('비밀번호 변경에 실패했습니다.');
+  }
+};
 
   return (
     <div className="space-y-8">
-      <header className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
-        <div>
-          <h2 className="text-3xl font-bold tracking-tight">졸업작품 기획안 제출</h2>
-          <p className="text-black/50 mt-1">차수별 기획안을 작성하고 심사 결과를 확인하세요.</p>
-        </div>
-        <div className="flex flex-col items-end gap-2">
-          <div className="flex gap-2">
+    <header className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
+  <div>
+    <h2 className="text-3xl font-bold tracking-tight">졸업작품 기획안 제출</h2>
+    <p className="text-black/50 mt-1">차수별 기획안을 작성하고 심사 결과를 확인하세요.</p>
+  </div>
+
+  <div className="flex flex-col items-end gap-2">
+    <div className="flex gap-2 flex-wrap justify-end">
+      <button
+        onClick={() => setShowPasswordModal(true)}
+        className="flex items-center gap-2 px-4 py-1.5 bg-white border border-black/10 rounded-xl text-xs font-bold hover:bg-black/5 transition-all"
+      >
+        <Lock size={14} /> 비밀번호 변경
+      </button>
+
+      {selectedRound > 1 && previousProposal && (
+        <>
+          <button
+            type="button"
+            onClick={() => setShowPreviousProposal(v => !v)}
+            className="px-4 py-1.5 bg-white border border-black/10 rounded-xl text-xs font-bold hover:bg-black/5 transition-all"
+          >
+            {showPreviousProposal ? `${selectedRound - 1}차 숨기기` : `${selectedRound - 1}차 보기`}
+          </button>
+
+          {!isLocked && (
             <button
-              onClick={() => setShowPasswordModal(true)}
-              className="flex items-center gap-2 px-4 py-1.5 bg-white border border-black/10 rounded-xl text-xs font-bold hover:bg-black/5 transition-all"
+              type="button"
+              onClick={handleCopyFromPrevious}
+              className="px-4 py-1.5 bg-blue-50 text-blue-700 border border-blue-100 rounded-xl text-xs font-bold hover:bg-blue-100 transition-all"
             >
-              <Lock size={14} /> 비밀번호 변경
+              {selectedRound - 1}차 내용 불러오기
             </button>
-            <div className="flex gap-2 bg-black/5 p-1 rounded-xl">
-              {[1, 2, 3].map(num => (
-                <button
-                  key={num}
-                  onClick={() => setSelectedRound(num)}
-                  className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${selectedRound === num ? 'bg-white text-black shadow-sm' : 'text-black/40 hover:text-black'}`}
-                >
-                  {num}차
-                </button>
-              ))}
-            </div>
-          </div>
-          {currentRoundInfo && (
-            <div className="flex flex-col items-end gap-1">
-              {lastAutoSave && (
-                <span className="text-[10px] font-bold text-black/20 flex items-center gap-1">
-                  <Save size={10} /> {lastAutoSave.toLocaleTimeString()} 자동 저장됨
-                </span>
-              )}
-              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${currentRoundInfo.is_open ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
-                {currentRoundInfo.is_open ? '입력 가능 기간' : '입력 마감'}
-              </span>
-            </div>
           )}
+        </>
+      )}
+
+      <div className="flex gap-2 bg-black/5 p-1 rounded-xl">
+        {[1, 2, 3].map(num => (
+          <button
+            key={num}
+            onClick={() => setSelectedRound(num)}
+            className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${
+              selectedRound === num ? 'bg-white text-black shadow-sm' : 'text-black/40 hover:text-black'
+            }`}
+          >
+            {num}차
+          </button>
+        ))}
+      </div>
+    </div>
+
+    {currentRoundInfo && (
+      <div className="flex flex-col items-end gap-1">
+        {lastAutoSave && (
+          <span className="text-[10px] font-bold text-black/20 flex items-center gap-1">
+            <Save size={10} /> {lastAutoSave.toLocaleTimeString()} 자동 저장됨
+          </span>
+        )}
+        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+          currentRoundInfo.is_open ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'
+        }`}>
+          {currentRoundInfo.is_open ? '입력 가능 기간' : '입력 마감'}
+        </span>
+      </div>
+    )}
+
+    {selectedRound > 1 && previousProposal && showPreviousProposal && (
+      <div className="mt-4 w-full bg-blue-50 border border-blue-100 rounded-2xl p-5 text-sm">
+        <div className="font-bold text-blue-800 mb-3">
+          {selectedRound - 1}차 제출안 참고
         </div>
-      </header>
+        <div className="grid md:grid-cols-2 gap-4 text-black/70">
+          <div>
+            <div><span className="font-bold">텍스트명:</span> {previousProposal.title || '-'}</div>
+            <div><span className="font-bold">작가명:</span> {previousProposal.author || '-'}</div>
+            <div><span className="font-bold">장르:</span> {previousProposal.genre || '-'}</div>
+          </div>
+          <div>
+            <div><span className="font-bold">주제:</span> {previousProposal.subject || '-'}</div>
+            <div><span className="font-bold">기획 의도:</span> {previousProposal.reason || '-'}</div>
+          </div>
+        </div>
+      </div>
+    )}
+  </div>
+</header>
 
       {/* Password Modal */}
       <AnimatePresence>
