@@ -426,10 +426,38 @@ app.get("/api/admin/rounds", authenticate, async (_req, res) => {
   res.json(rounds);
 });
 
+app.get("/api/rounds/current", authenticate, async (_req, res) => {
+  try {
+    const activeRound = await db.get(
+      "SELECT * FROM rounds WHERE is_open = 1 ORDER BY round_number DESC LIMIT 1"
+    ) as any;
+
+    res.json({
+      activeRoundNumber: activeRound?.round_number ?? 1,
+      round: activeRound || null,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post("/api/admin/rounds/toggle", authenticate, authorize(["admin"]), async (req, res) => {
   const { roundNumber, isOpen } = req.body;
-  await db.run("UPDATE rounds SET is_open = ? WHERE round_number = ?", [isOpen ? 1 : 0, roundNumber]);
-  res.json({ success: true });
+
+  try {
+    if (isOpen) {
+      await db.run("UPDATE rounds SET is_open = 0");
+      await db.run("UPDATE rounds SET is_open = 1 WHERE round_number = ?", [roundNumber]);
+    } else {
+      await db.run("UPDATE rounds SET is_open = 0 WHERE round_number = ?", [roundNumber]);
+    }
+
+    const rounds = await db.query("SELECT * FROM rounds ORDER BY round_number ASC");
+    res.json({ success: true, rounds });
+  } catch (err: any) {
+    console.error("[ADMIN rounds toggle]", err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.post("/api/admin/clear-data", authenticate, authorize(["admin"]), async (_req, res) => {
@@ -777,6 +805,43 @@ app.get("/api/proposals/my/:userId/:roundNumber", authenticate, async (req: any,
     res.json({ ...proposal, works, is_evaluated: isEvaluated });
   } else {
     res.json(null);
+  }
+});
+
+app.get("/api/proposals/reference/:userId/:roundNumber", authenticate, async (req: any, res) => {
+  const { userId, roundNumber } = req.params;
+
+  if (req.user.role === "student" && req.user.id !== userId) {
+    return res.status(403).json({ error: "권한이 없습니다." });
+  }
+
+  try {
+    const proposal = await db.get(
+      "SELECT * FROM proposals WHERE user_id = ? AND round_number = ?",
+      [userId, roundNumber]
+    ) as any;
+
+    if (!proposal) {
+      return res.json(null);
+    }
+
+    const works = await db.query(
+      "SELECT * FROM works WHERE proposal_id = ? ORDER BY work_number ASC",
+      [proposal.id]
+    ) as any[];
+
+    for (const work of works) {
+      const images = await db.query("SELECT url FROM work_images WHERE work_id = ?", [work.id]) as any[];
+      work.images = images.map((i: any) => i.url);
+    }
+
+    res.json({
+      ...proposal,
+      works,
+    });
+  } catch (err: any) {
+    console.error("[REFERENCE proposal]", err);
+    res.status(500).json({ error: err.message });
   }
 });
 
