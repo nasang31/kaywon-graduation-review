@@ -1031,7 +1031,7 @@ app.delete("/api/admin/proposals/:proposalId/reset", authenticate, authorize(["a
       return res.status(404).json({ error: "초기화할 기획안을 찾을 수 없습니다." });
     }
 
-    const works = await db.all(
+    const works = await db.query(
       `SELECT id FROM works WHERE proposal_id = ?`,
       [proposalId]
     ) as any[];
