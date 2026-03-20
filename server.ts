@@ -1018,6 +1018,55 @@ app.delete("/api/evaluations/:proposalId/:judgeId", authenticate, authorize(["ju
   }
 });
 
+app.delete("/api/admin/proposals/:proposalId/reset", authenticate, authorize(["admin"]), async (req: any, res) => {
+  const { proposalId } = req.params;
+
+  try {
+    const proposal = await db.get(
+      `SELECT * FROM proposals WHERE id = ?`,
+      [proposalId]
+    ) as any;
+
+    if (!proposal) {
+      return res.status(404).json({ error: "초기화할 기획안을 찾을 수 없습니다." });
+    }
+
+    const works = await db.all(
+      `SELECT id FROM works WHERE proposal_id = ?`,
+      [proposalId]
+    ) as any[];
+
+    const workIds = works.map(w => w.id);
+
+    await db.run(`DELETE FROM evaluations WHERE proposal_id = ?`, [proposalId]);
+
+    if (workIds.length > 0) {
+      const placeholders = workIds.map(() => "?").join(",");
+      await db.run(
+        `DELETE FROM work_images WHERE work_id IN (${placeholders})`,
+        workIds
+      );
+    }
+
+    await db.run(`DELETE FROM works WHERE proposal_id = ?`, [proposalId]);
+    await db.run(`DELETE FROM proposals WHERE id = ?`, [proposalId]);
+
+    console.log("[ADMIN RESET PROPOSAL]", {
+      adminId: req.user.id,
+      proposalId,
+      studentId: proposal.student_id,
+      studentName: proposal.name,
+      roundNumber: proposal.round_number,
+      deletedAt: new Date().toISOString(),
+    });
+
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error("[ADMIN RESET PROPOSAL ERROR]", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post("/api/admin/presentation-order", authenticate, authorize(["admin"]), async (req, res) => {
   const { orders } = req.body;
 
