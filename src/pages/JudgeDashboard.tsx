@@ -136,7 +136,8 @@ export default function JudgeDashboard({ user, forcedProposalId }: JudgeDashboar
   const didSetInitialRound = useRef(false);
 
   const latestRequestId = useRef(0);
-
+  const latestStudentsRequestId = useRef(0);
+  
   const setWorkGrade = (num: 1 | 2 | 3, grade: string) => {
     setEvaluation(prev => ({
       ...prev,
@@ -204,8 +205,10 @@ export default function JudgeDashboard({ user, forcedProposalId }: JudgeDashboar
   }, []);
 
   useEffect(() => {
-    fetchStudents();
-  }, [selectedRound]);
+  setSelectedProposal(null);
+  setPreviousProposal(null);
+  fetchStudents();
+}, [selectedRound]);
 
   useEffect(() => {
     if (forcedProposalId) handleSelectStudent(forcedProposalId);
@@ -243,17 +246,24 @@ export default function JudgeDashboard({ user, forcedProposalId }: JudgeDashboar
   };
 
   const fetchStudents = async () => {
-    try {
-      const res = await fetch(`/api/students/${selectedRound}?judgeId=${user.id}`);
-      const data = await res.json();
-      setStudents(Array.isArray(data) ? data : []);
-      setPreviousProposal(null);
-    } catch (err) {
-      console.error('Failed to fetch students:', err);
-      setStudents([]);
-      setPreviousProposal(null);
-    }
-  };
+  const requestId = ++latestStudentsRequestId.current;
+
+  try {
+    const res = await fetch(`/api/students/${selectedRound}?judgeId=${user.id}`);
+    const data = await res.json();
+
+    if (requestId !== latestStudentsRequestId.current) return;
+
+    setStudents(Array.isArray(data) ? data : []);
+    setPreviousProposal(null);
+  } catch (err) {
+    if (requestId !== latestStudentsRequestId.current) return;
+
+    console.error('Failed to fetch students:', err);
+    setStudents([]);
+    setPreviousProposal(null);
+  }
+};
 
   const fetchPreviousProposal = async (userId: number | string) => {
     if (selectedRound <= 1) {
