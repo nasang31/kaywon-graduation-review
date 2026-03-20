@@ -1,7 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Download, Users, FileText, BarChart3, Search, UserPlus, RotateCcw, Trash2, ShieldCheck, GraduationCap, Database, FlaskConical, Upload, ChevronLeft, ChevronRight } from 'lucide-react';
-import { GRADE_SCORES, User as UserType, User } from '../types';
+import {
+  Download, Users, FileText, BarChart3, Search, UserPlus, RotateCcw, Trash2,
+  ShieldCheck, GraduationCap, Database, FlaskConical, Upload, ChevronLeft, ChevronRight
+} from 'lucide-react';
+import { User as UserType, User } from '../types';
 import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
 import JudgeDashboard from './JudgeDashboard';
@@ -12,20 +15,26 @@ interface AdminDashboardProps {
 
 export default function AdminDashboard({ user }: AdminDashboardProps) {
   const [activeTab, setActiveTab] = useState<'stats' | 'users' | 'rounds' | 'ordering'>('stats');
-  const [selectedStudentId, setSelectedStudentId] = useState<number | null>(null);
+  const [selectedStudentId, setSelectedStudentId] = useState<string | number | null>(null);
   const [stats, setStats] = useState<any[]>([]);
   const [users, setUsers] = useState<UserType[]>([]);
   const [rounds, setRounds] = useState<any[]>([]);
   const [selectedRound, setSelectedRound] = useState(1);
   const [searchTerm, setSearchTerm] = useState('');
-  
-  // User creation state
-  const [newUser, setNewUser] = useState({ username: '', name: '', role: 'student' as const, student_id: '' });
+
+  const didSetInitialRound = useRef(false);
+  const latestStatsRequestId = useRef(0);
+
+  const [newUser, setNewUser] = useState({
+    username: '',
+    name: '',
+    role: 'student' as const,
+    student_id: ''
+  });
   const [loading, setLoading] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 20;
 
-  // Custom Confirm Modal State
   const [confirmModal, setConfirmModal] = useState<{
     isOpen: boolean;
     title: string;
@@ -39,38 +48,61 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
     onConfirm: () => {},
   });
 
+  const [deletingId, setDeletingId] = useState<string | number | null>(null);
+  const [orderingMode, setOrderingMode] = useState<'id_asc' | 'id_desc' | 'manual'>('id_asc');
+  const [manualOrders, setManualOrders] = useState<Record<string, number>>({});
+
   const showConfirm = (title: string, message: string, onConfirm: () => void, isDanger = false) => {
-    console.log('[ADMIN] Opening confirm modal:', { title, message });
     setConfirmModal({ isOpen: true, title, message, onConfirm, isDanger });
   };
 
   useEffect(() => {
-    if (activeTab === 'stats' || activeTab === 'ordering') fetchStats();
-    if (activeTab === 'users') fetchUsers();
-    if (activeTab === 'rounds') fetchRounds();
-  }, [activeTab, selectedRound]);
+    fetchRounds();
+  }, []);
+
+  useEffect(() => {
+  if (activeTab === 'stats' || activeTab === 'ordering') fetchStats();
+  if (activeTab === 'users') fetchUsers();
+  if (activeTab === 'rounds') fetchRounds();
+}, [activeTab, selectedRound]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm]);
+
+  useEffect(() => {
+    if (Array.isArray(stats) && stats.length > 0) {
+      const initialManualOrders: Record<string, number> = {};
+      stats.forEach(s => {
+        initialManualOrders[String(s.user_id)] = s.presentation_order || 0;
+      });
+      setManualOrders(initialManualOrders);
+    }
+  }, [stats]);
 
   const fetchStats = async () => {
-    console.log('[ADMIN] Fetching stats for round:', selectedRound);
+    const requestId = ++latestStatsRequestId.current;
+
     try {
       const res = await fetch(`/api/admin/stats/${selectedRound}`);
       if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
       const data = await res.json();
-      console.log('[ADMIN] Stats data received:', data);
+
+      if (requestId !== latestStatsRequestId.current) return;
+
       setStats(Array.isArray(data) ? data : []);
     } catch (err) {
+      if (requestId !== latestStatsRequestId.current) return;
       console.error('[ADMIN] Failed to fetch stats:', err);
       setStats([]);
     }
   };
 
   const fetchUsers = async () => {
-    console.log('[ADMIN] Fetching users');
     try {
       const res = await fetch('/api/admin/users');
       if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
       const data = await res.json();
-      console.log('[ADMIN] Users data received:', data);
       setUsers(Array.isArray(data) ? data : []);
     } catch (err) {
       console.error('[ADMIN] Failed to fetch users:', err);
@@ -79,13 +111,22 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
   };
 
   const fetchRounds = async () => {
-    console.log('[ADMIN] Fetching rounds');
     try {
       const res = await fetch('/api/admin/rounds');
       if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
       const data = await res.json();
-      console.log('[ADMIN] Rounds data received:', data);
-      setRounds(Array.isArray(data) ? data : []);
+
+      if (Array.isArray(data)) {
+        setRounds(data);
+
+        const activeRound = data.find((r: any) => Number(r.is_open) === 1);
+        if (activeRound && !didSetInitialRound.current) {
+          didSetInitialRound.current = true;
+          setSelectedRound(activeRound.round_number);
+        }
+      } else {
+        setRounds([]);
+      }
     } catch (err) {
       console.error('[ADMIN] Failed to fetch rounds:', err);
       setRounds([]);
@@ -98,7 +139,16 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ roundNumber, isOpen }),
     });
-    if (res.ok) fetchRounds();
+
+    if (res.ok) {
+      if (isOpen) {
+        setSelectedRound(roundNumber);
+      }
+      await fetchRounds();
+      if (activeTab === 'stats' || activeTab === 'ordering') {
+        await fetchStats();
+      }
+    }
   };
 
   const handleClearData = async () => {
@@ -139,7 +189,7 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
     }
   };
 
-  const handleResetPassword = async (userId: number) => {
+  const handleResetPassword = async (userId: string | number) => {
     showConfirm(
       '비밀번호 초기화',
       '비밀번호를 초기 비밀번호(아이디)로 되돌리시겠습니까?',
@@ -154,55 +204,46 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
     );
   };
 
-  const [deletingId, setDeletingId] = useState<number | null>(null);
-  const [orderingMode, setOrderingMode] = useState<'id_asc' | 'id_desc' | 'manual'>('id_asc');
-  const [manualOrders, setManualOrders] = useState<Record<number, number>>({});
-
-  useEffect(() => {
-    if (Array.isArray(stats) && stats.length > 0) {
-      const initialManualOrders: Record<number, number> = {};
-      stats.forEach(s => {
-        initialManualOrders[s.user_id] = s.presentation_order || 0;
-      });
-      setManualOrders(initialManualOrders);
-    }
-  }, [stats]);
-
-  const handleManualOrderChange = (userId: number, order: number) => {
-    setManualOrders(prev => ({ ...prev, [userId]: order }));
+  const handleManualOrderChange = (userId: string | number, order: number) => {
+    setManualOrders(prev => ({ ...prev, [String(userId)]: order }));
   };
 
   const handleApplyManualOrders = async () => {
     if (!Array.isArray(stats)) return;
+
     const newOrders = stats.map(s => ({
       proposalId: s.id,
       userId: s.user_id,
-      order: manualOrders[s.user_id] || 0,
+      order: manualOrders[String(s.user_id)] || 0,
       isParticipating: !!s.is_participating
     }));
+
     await handleBulkOrderUpdate(newOrders);
     alert('발표 순서가 저장되었습니다.');
   };
 
   const handleApplyAutoOrder = async (mode: 'id_asc' | 'id_desc') => {
     if (!Array.isArray(stats)) return;
+
     const sorted = [...stats].sort((a, b) => {
-      if (mode === 'id_asc') return a.student_id.localeCompare(b.student_id);
-      return b.student_id.localeCompare(a.student_id);
+      if (mode === 'id_asc') return (a.student_id || '').localeCompare(b.student_id || '');
+      return (b.student_id || '').localeCompare(a.student_id || '');
     });
-    
+
     const newOrders = sorted.map((s, idx) => ({
       proposalId: s.id,
       userId: s.user_id,
       order: idx + 1,
       isParticipating: !!s.is_participating
     }));
+
     await handleBulkOrderUpdate(newOrders);
     alert(`${mode === 'id_asc' ? '학번순' : '학번역순'}으로 순서가 재배정되었습니다.`);
   };
 
   const handleToggleAllParticipation = async (participate: boolean) => {
     if (!Array.isArray(stats)) return;
+
     showConfirm(
       participate ? '전체 발표 참여' : '전체 발표 제외',
       `모든 학생을 발표 ${participate ? '참여' : '제외'} 상태로 변경하시겠습니까?`,
@@ -218,7 +259,7 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
     );
   };
 
-  const handleDeleteUser = async (userId: number) => {
+  const handleDeleteUser = async (userId: string | number) => {
     showConfirm(
       '사용자 삭제',
       '정말로 이 사용자를 삭제하시겠습니까? 관련 데이터가 모두 삭제될 수 있습니다.',
@@ -227,7 +268,7 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
         try {
           const res = await fetch(`/api/admin/users/${userId}`, { method: 'DELETE' });
           const data = await res.json();
-          
+
           if (res.ok) {
             alert('사용자가 성공적으로 삭제되었습니다.');
             fetchUsers();
@@ -249,21 +290,18 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
     try {
       const res = await fetch('/api/admin/backup');
       const data = await res.json();
-      
+
       const wb = XLSX.utils.book_new();
-      
-      // Proposals Sheet
+
       const proposalsWs = XLSX.utils.json_to_sheet(data.proposals);
-      XLSX.utils.book_append_sheet(wb, proposalsWs, "기획안_전체");
-      
-      // Evaluations Sheet
+      XLSX.utils.book_append_sheet(wb, proposalsWs, '기획안_전체');
+
       const evalsWs = XLSX.utils.json_to_sheet(data.evaluations);
-      XLSX.utils.book_append_sheet(wb, evalsWs, "심사_전체");
-      
-      // Users Sheet
+      XLSX.utils.book_append_sheet(wb, evalsWs, '심사_전체');
+
       const usersWs = XLSX.utils.json_to_sheet(data.users);
-      XLSX.utils.book_append_sheet(wb, usersWs, "사용자_전체");
-      
+      XLSX.utils.book_append_sheet(wb, usersWs, '사용자_전체');
+
       XLSX.writeFile(wb, `시스템_전체_백업_${new Date().toISOString().split('T')[0]}.xlsx`);
       alert('전체 백업 파일이 생성되었습니다.');
     } catch (err) {
@@ -301,6 +339,7 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
 
   const exportToExcel = () => {
     if (!Array.isArray(stats)) return;
+
     const data = stats.map(s => {
       const row: any = {
         '상태': s.is_submitted ? '최종 제출' : '작성 중',
@@ -314,25 +353,21 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
         '작품3 평균': s.avgWork3,
       };
 
-      // Add individual judge scores
       if (Array.isArray(s.evaluations)) {
         s.evaluations.forEach((e: any, idx: number) => {
-          row[`교수${idx+1} 총점`] = e.totalScore?.toFixed(2) || "0.00";
-          row[`교수${idx+1} 텍스트 선정 점수`] = e.scores?.text || 0;
-          row[`교수${idx+1} 작품1 점수`] = e.scores?.work1 || 0;
-          row[`교수${idx+1} 작품2 점수`] = e.scores?.work2 || 0;
-          row[`교수${idx+1} 작품3 점수`] = e.scores?.work3 || 0;
+          row[`교수${idx + 1} 총점`] = e.totalScore?.toFixed(2) || '0.00';
+          row[`교수${idx + 1} 텍스트 선정 점수`] = e.scores?.text || 0;
+          row[`교수${idx + 1} 작품1 점수`] = e.scores?.work1 || 0;
+          row[`교수${idx + 1} 작품2 점수`] = e.scores?.work2 || 0;
+          row[`교수${idx + 1} 작품3 점수`] = e.scores?.work3 || 0;
         });
       }
 
-      // Add feedback at the very end
-      const feedbacks = Array.isArray(s.evaluations) 
-        ? s.evaluations
-          .map((e: any, idx: number) => `교수${idx+1}: ${e.comment || '의견 없음'}`)
-          .join(' / ')
+      const feedbacks = Array.isArray(s.evaluations)
+        ? s.evaluations.map((e: any, idx: number) => `교수${idx + 1}: ${e.comment || '의견 없음'}`).join(' / ')
         : '';
-      row['교수진 피드백'] = feedbacks;
 
+      row['교수진 피드백'] = feedbacks;
       return row;
     });
 
@@ -342,12 +377,6 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
     XLSX.writeFile(wb, `졸업작품_${selectedRound}차_심사결과_${new Date().toISOString().split('T')[0]}.xlsx`);
   };
 
-  const filteredStats = Array.isArray(stats) ? stats.filter(s => 
-    s.name?.includes(searchTerm) || 
-    s.student_id?.includes(searchTerm) || 
-    s.title?.includes(searchTerm)
-  ) : [];
-
   const handleBulkUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -355,13 +384,11 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
     const reader = new FileReader();
     reader.onload = (e) => {
       const buffer = e.target?.result as ArrayBuffer;
-      
-      // Try UTF-8 first
+
       const utf8Decoder = new TextDecoder('utf-8');
       let text = utf8Decoder.decode(buffer);
-      
-      // If it contains replacement characters, it's likely not UTF-8 (probably EUC-KR from Excel)
-      if (text.includes('')) {
+
+      if (text.includes('�')) {
         const eucKrDecoder = new TextDecoder('euc-kr');
         text = eucKrDecoder.decode(buffer);
       }
@@ -372,6 +399,7 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
         complete: async (results) => {
           const data = results.data as any[];
           const validUsers = data.filter(u => u.role && u.username && u.name);
+
           if (validUsers.length === 0) {
             alert('유효한 사용자 데이터가 없습니다. CSV 형식을 확인해주세요. (필수: role, username, name)');
             return;
@@ -405,45 +433,71 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
         }
       });
     };
+
     reader.readAsArrayBuffer(file);
     event.target.value = '';
   };
 
-  const filteredUsers = Array.isArray(users) ? users.filter(u => 
-    (u.name?.toLowerCase().includes(searchTerm.toLowerCase())) || 
-    (u.username?.toLowerCase().includes(searchTerm.toLowerCase())) ||
-    (u.student_id?.toLowerCase().includes(searchTerm.toLowerCase()))
-  ) : [];
+  const filteredStats = Array.isArray(stats)
+    ? stats.filter(s =>
+        s.name?.includes(searchTerm) ||
+        s.student_id?.includes(searchTerm) ||
+        s.title?.includes(searchTerm)
+      )
+    : [];
+
+  const filteredUsers = Array.isArray(users)
+    ? users.filter(u =>
+        u.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        u.username?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        u.student_id?.toLowerCase().includes(searchTerm.toLowerCase())
+      )
+    : [];
 
   const totalPages = Math.ceil(filteredUsers.length / pageSize);
   const paginatedUsers = filteredUsers.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [searchTerm]);
-
-  const handleUpdateOrder = async (proposalId: number | null, userId: number, newOrder: number, isParticipating?: boolean) => {
+  const handleUpdateOrder = async (
+    proposalId: string | number | null,
+    userId: string | number,
+    newOrder: number,
+    isParticipating?: boolean
+  ) => {
     if (!Array.isArray(stats)) return;
+
     const updatedStats = stats.map(s => {
-      if (s.id === proposalId && proposalId !== null) return { ...s, presentation_order: newOrder, is_participating: isParticipating !== undefined ? isParticipating : s.is_participating };
-      if (s.user_id === userId) return { ...s, presentation_order: newOrder, is_participating: isParticipating !== undefined ? isParticipating : s.is_participating };
+      if (s.id === proposalId && proposalId !== null) {
+        return {
+          ...s,
+          presentation_order: newOrder,
+          is_participating: isParticipating !== undefined ? isParticipating : s.is_participating
+        };
+      }
+      if (s.user_id === userId) {
+        return {
+          ...s,
+          presentation_order: newOrder,
+          is_participating: isParticipating !== undefined ? isParticipating : s.is_participating
+        };
+      }
       return s;
     });
+
     setStats(updatedStats);
-    
+
     try {
       const target = updatedStats.find(s => s.user_id === userId);
       await fetch('/api/admin/presentation-order', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          orders: [{ 
-            proposalId, 
-            userId, 
-            order: newOrder, 
+        body: JSON.stringify({
+          orders: [{
+            proposalId,
+            userId,
+            order: newOrder,
             isParticipating: target?.is_participating,
-            roundNumber: selectedRound 
-          }] 
+            roundNumber: selectedRound
+          }]
         }),
       });
     } catch (err) {
@@ -451,13 +505,15 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
     }
   };
 
-  const handleBulkOrderUpdate = async (newOrders: { proposalId: number | null, userId: number, order: number, isParticipating: boolean }[]) => {
+  const handleBulkOrderUpdate = async (
+    newOrders: { proposalId: string | number | null; userId: string | number; order: number; isParticipating: boolean }[]
+  ) => {
     try {
       const res = await fetch('/api/admin/presentation-order', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          orders: newOrders.map(o => ({ ...o, roundNumber: selectedRound })) 
+        body: JSON.stringify({
+          orders: newOrders.map(o => ({ ...o, roundNumber: selectedRound }))
         }),
       });
       if (res.ok) {
@@ -471,7 +527,7 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
   if (selectedStudentId) {
     return (
       <div className="space-y-6">
-        <button 
+        <button
           onClick={() => setSelectedStudentId(null)}
           className="flex items-center gap-2 text-black/50 hover:text-black transition-colors"
         >
@@ -489,25 +545,25 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
         <div>
           <h2 className="text-3xl font-bold tracking-tight">관리자 대시보드</h2>
           <div className="flex flex-wrap gap-4 mt-4">
-            <button 
+            <button
               onClick={() => setActiveTab('stats')}
               className={`px-4 py-2 rounded-xl text-sm font-bold transition-all ${activeTab === 'stats' ? 'bg-black text-white' : 'bg-white border border-black/10 text-black/40 hover:text-black'}`}
             >
               심사 현황 및 통계
             </button>
-            <button 
+            <button
               onClick={() => setActiveTab('users')}
               className={`px-4 py-2 rounded-xl text-sm font-bold transition-all ${activeTab === 'users' ? 'bg-black text-white' : 'bg-white border border-black/10 text-black/40 hover:text-black'}`}
             >
               사용자 관리
             </button>
-            <button 
+            <button
               onClick={() => setActiveTab('rounds')}
               className={`px-4 py-2 rounded-xl text-sm font-bold transition-all ${activeTab === 'rounds' ? 'bg-black text-white' : 'bg-white border border-black/10 text-black/40 hover:text-black'}`}
             >
               심사 차수 관리
             </button>
-            <button 
+            <button
               onClick={() => setActiveTab('ordering')}
               className={`px-4 py-2 rounded-xl text-sm font-bold transition-all ${activeTab === 'ordering' ? 'bg-black text-white' : 'bg-white border border-black/10 text-black/40 hover:text-black'}`}
             >
@@ -515,9 +571,9 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
             </button>
           </div>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           {activeTab === 'stats' && (
-            <button 
+            <button
               onClick={handleSeedData}
               disabled={loading}
               className="flex items-center gap-2 px-6 py-3 bg-amber-50 text-amber-600 rounded-2xl font-bold hover:bg-amber-100 transition-all border border-amber-100"
@@ -527,7 +583,7 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
             </button>
           )}
           {activeTab === 'stats' && (
-            <button 
+            <button
               onClick={handleFullBackup}
               className="flex items-center gap-2 px-6 py-3 bg-black text-white rounded-2xl font-bold hover:bg-black/90 transition-all shadow-lg shadow-black/20"
             >
@@ -536,7 +592,7 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
             </button>
           )}
           {activeTab === 'stats' && (
-            <button 
+            <button
               onClick={exportToExcel}
               className="flex items-center gap-2 px-6 py-3 bg-emerald-600 text-white rounded-2xl font-bold hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-600/20"
             >
@@ -544,7 +600,7 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
               엑셀 다운로드
             </button>
           )}
-          <button 
+          <button
             onClick={handleClearData}
             className="flex items-center gap-2 px-6 py-3 bg-red-50 text-red-600 rounded-2xl font-bold hover:bg-red-100 transition-all border border-red-100"
           >
@@ -556,27 +612,33 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
 
       <AnimatePresence mode="wait">
         {activeTab === 'stats' ? (
-          <motion.div 
+          <motion.div
             key="stats"
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
             className="space-y-8"
           >
-            {/* Round Selector */}
-            <div className="flex gap-2 bg-black/5 p-1.5 rounded-2xl w-fit">
-              {[1, 2, 3].map(num => (
-                <button
-                  key={num}
-                  onClick={() => setSelectedRound(num)}
-                  className={`px-6 py-2 rounded-xl text-sm font-bold transition-all ${selectedRound === num ? 'bg-white text-black shadow-sm' : 'text-black/40 hover:text-black'}`}
-                >
-                  {num}차 심사
-                </button>
-              ))}
+            <div className="flex items-center gap-3 flex-wrap">
+              {rounds.some((r: any) => Number(r.is_open) === 1) && (
+                <div className="text-[11px] font-bold px-3 py-1 rounded-full bg-emerald-100 text-emerald-700">
+                  현재 진행 차수: {rounds.find((r: any) => Number(r.is_open) === 1)?.round_number}차
+                </div>
+              )}
+
+              <div className="flex gap-2 bg-black/5 p-1.5 rounded-2xl w-fit">
+                {[1, 2, 3].map(num => (
+                  <button
+                    key={num}
+                    onClick={() => setSelectedRound(num)}
+                    className={`px-6 py-2 rounded-xl text-sm font-bold transition-all ${selectedRound === num ? 'bg-white text-black shadow-sm' : 'text-black/40 hover:text-black'}`}
+                  >
+                    {num}차 심사
+                  </button>
+                ))}
+              </div>
             </div>
 
-            {/* Stats Summary */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <div className="bg-white p-6 rounded-3xl shadow-sm border border-black/5">
                 <div className="flex items-center gap-4 mb-4">
@@ -587,6 +649,7 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
                 </div>
                 <div className="text-4xl font-bold">{Array.isArray(stats) ? stats.filter(s => s.is_submitted).length : 0}명</div>
               </div>
+
               <div className="bg-white p-6 rounded-3xl shadow-sm border border-black/5">
                 <div className="flex items-center gap-4 mb-4">
                   <div className="w-10 h-10 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center">
@@ -596,6 +659,7 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
                 </div>
                 <div className="text-4xl font-bold">{Array.isArray(stats) ? stats.filter(s => Array.isArray(s.evaluations) && s.evaluations.length > 0).length : 0}명</div>
               </div>
+
               <div className="bg-white p-6 rounded-3xl shadow-sm border border-black/5">
                 <div className="flex items-center gap-4 mb-4">
                   <div className="w-10 h-10 bg-amber-50 text-amber-600 rounded-xl flex items-center justify-center">
@@ -604,12 +668,16 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
                   <span className="text-sm font-bold text-black/40 uppercase tracking-wider">평균 총점</span>
                 </div>
                 <div className="text-4xl font-bold">
-                  {Array.isArray(stats) ? (stats.reduce((acc, s) => acc + (parseFloat(s.averageScore) || 0), 0) / (stats.filter(s => Array.isArray(s.evaluations) && s.evaluations.length > 0).length || 1)).toFixed(2) : "0.00"}
+                  {Array.isArray(stats)
+                    ? (
+                        stats.reduce((acc, s) => acc + (parseFloat(s.averageScore) || 0), 0) /
+                        (stats.filter(s => Array.isArray(s.evaluations) && s.evaluations.length > 0).length || 1)
+                      ).toFixed(2)
+                    : '0.00'}
                 </div>
               </div>
             </div>
 
-            {/* Stats Table */}
             <section className="bg-white rounded-3xl shadow-sm border border-black/5 overflow-hidden">
               <div className="p-6 border-b border-black/5 flex justify-between items-center">
                 <h3 className="text-lg font-bold">{selectedRound}차 심사 현황</h3>
@@ -624,6 +692,7 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
                   />
                 </div>
               </div>
+
               <div className="overflow-x-auto">
                 <table className="w-full text-left border-collapse">
                   <thead>
@@ -660,7 +729,7 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
                         </td>
                         <td className="px-6 py-4 text-sm font-mono">{s.student_id}</td>
                         <td className="px-6 py-4 text-sm font-bold">
-                          <button 
+                          <button
                             onClick={() => s.id && setSelectedStudentId(s.id)}
                             disabled={!s.id}
                             className={`${s.id ? 'hover:text-blue-600 transition-colors' : 'cursor-default'} text-left`}
@@ -680,7 +749,7 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
                         <td className="px-6 py-4 text-sm font-medium text-black/60">{s.avgWork3}</td>
                         <td className="px-6 py-4">
                           <div className="flex flex-wrap gap-2">
-                            {s.evaluations.map((e: any, i: number) => (
+                            {(s.evaluations || []).map((e: any, i: number) => (
                               <div key={i} className="group relative">
                                 <div className="w-8 h-8 bg-black/5 rounded-full flex items-center justify-center text-[10px] font-bold cursor-help hover:bg-black hover:text-white transition-all">
                                   {i + 1}
@@ -697,7 +766,6 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
                                     <span>작품3: {e.scores.work3}</span>
                                   </div>
                                   <p className="leading-relaxed italic whitespace-pre-wrap">"{e.comment}"</p>
-                                  {/* Tooltip Arrow */}
                                   <div className="absolute top-1/2 -translate-y-1/2 -right-1 w-2 h-2 bg-black rotate-45 border-r border-t border-white/10" />
                                 </div>
                               </div>
@@ -712,14 +780,13 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
             </section>
           </motion.div>
         ) : activeTab === 'users' ? (
-          <motion.div 
+          <motion.div
             key="users"
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
             className="grid grid-cols-1 lg:grid-cols-3 gap-8"
           >
-            {/* User Creation Form */}
             <div className="lg:col-span-1">
               <section className="bg-white p-8 rounded-3xl shadow-sm border border-black/5 sticky top-24">
                 <h3 className="text-xl font-bold mb-6 flex items-center gap-2">
@@ -732,55 +799,59 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
                     <div className="flex gap-2">
                       <button
                         type="button"
-                        onClick={() => setNewUser({...newUser, role: 'student'})}
+                        onClick={() => setNewUser({ ...newUser, role: 'student' })}
                         className={`flex-1 py-2 rounded-xl text-xs font-bold border transition-all ${newUser.role === 'student' ? 'bg-black text-white border-black' : 'bg-white text-black/40 border-black/10'}`}
                       >
                         학생
                       </button>
                       <button
                         type="button"
-                        onClick={() => setNewUser({...newUser, role: 'judge'})}
+                        onClick={() => setNewUser({ ...newUser, role: 'judge' })}
                         className={`flex-1 py-2 rounded-xl text-xs font-bold border transition-all ${newUser.role === 'judge' ? 'bg-black text-white border-black' : 'bg-white text-black/40 border-black/10'}`}
                       >
                         교수
                       </button>
                     </div>
                   </div>
+
                   <div>
                     <label className="block text-xs font-bold text-black/40 uppercase mb-2">아이디 (학번/성함)</label>
                     <input
                       type="text"
                       value={newUser.username}
-                      onChange={e => setNewUser({...newUser, username: e.target.value})}
+                      onChange={e => setNewUser({ ...newUser, username: e.target.value })}
                       className="w-full px-4 py-2.5 rounded-xl border border-black/10 focus:ring-2 focus:ring-black/5 outline-none"
                       placeholder="예: 20240001 또는 김교수"
                       required
                     />
                   </div>
+
                   <div>
                     <label className="block text-xs font-bold text-black/40 uppercase mb-2">이름</label>
                     <input
                       type="text"
                       value={newUser.name}
-                      onChange={e => setNewUser({...newUser, name: e.target.value})}
+                      onChange={e => setNewUser({ ...newUser, name: e.target.value })}
                       className="w-full px-4 py-2.5 rounded-xl border border-black/10 focus:ring-2 focus:ring-black/5 outline-none"
                       placeholder="실명 입력"
                       required
                     />
                   </div>
+
                   {newUser.role === 'student' && (
                     <div>
                       <label className="block text-xs font-bold text-black/40 uppercase mb-2">학번 확인</label>
                       <input
                         type="text"
                         value={newUser.student_id}
-                        onChange={e => setNewUser({...newUser, student_id: e.target.value})}
+                        onChange={e => setNewUser({ ...newUser, student_id: e.target.value })}
                         className="w-full px-4 py-2.5 rounded-xl border border-black/10 focus:ring-2 focus:ring-black/5 outline-none"
                         placeholder="학번 다시 입력"
                         required
                       />
                     </div>
                   )}
+
                   <button
                     type="submit"
                     disabled={loading}
@@ -792,7 +863,6 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
               </section>
             </div>
 
-            {/* User List */}
             <div className="lg:col-span-2">
               <section className="bg-white rounded-3xl shadow-sm border border-black/5 overflow-hidden">
                 <div className="p-6 border-b border-black/5 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -818,6 +888,7 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
                     </label>
                   </div>
                 </div>
+
                 <div className="overflow-x-auto">
                   <table className="w-full text-left border-collapse">
                     <thead>
@@ -857,14 +928,14 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
                             )}
                           </td>
                           <td className="px-6 py-4 text-right space-x-2">
-                            <button 
+                            <button
                               onClick={() => handleResetPassword(u.id)}
                               className="p-2 text-black/30 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-all"
                               title="비밀번호 초기화"
                             >
                               <RotateCcw size={16} />
                             </button>
-                            <button 
+                            <button
                               onClick={() => handleDeleteUser(u.id)}
                               disabled={deletingId === u.id}
                               className={`p-2 rounded-lg transition-all ${deletingId === u.id ? 'text-black/10 bg-black/5 cursor-not-allowed' : 'text-black/30 hover:text-red-600 hover:bg-red-50'}`}
@@ -883,7 +954,6 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
                   </table>
                 </div>
 
-                {/* Pagination */}
                 {totalPages > 1 && (
                   <div className="p-6 border-t border-black/5 flex justify-center items-center gap-2">
                     <button
@@ -893,7 +963,7 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
                     >
                       <ChevronLeft size={20} />
                     </button>
-                    
+
                     <div className="flex gap-1">
                       {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
                         <button
@@ -919,7 +989,7 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
             </div>
           </motion.div>
         ) : activeTab === 'ordering' ? (
-          <motion.div 
+          <motion.div
             key="ordering"
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
@@ -927,37 +997,48 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
             className="space-y-8"
           >
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-              <div className="flex gap-2 bg-black/5 p-1.5 rounded-2xl w-fit">
-                {[1, 2, 3].map(num => (
-                  <button
-                    key={num}
-                    onClick={() => setSelectedRound(num)}
-                    className={`px-6 py-2 rounded-xl text-sm font-bold transition-all ${selectedRound === num ? 'bg-white text-black shadow-sm' : 'text-black/40 hover:text-black'}`}
-                  >
-                    {num}차 심사
-                  </button>
-                ))}
+              <div className="flex items-center gap-3 flex-wrap">
+                {rounds.some((r: any) => Number(r.is_open) === 1) && (
+                  <div className="text-[11px] font-bold px-3 py-1 rounded-full bg-emerald-100 text-emerald-700">
+                    현재 진행 차수: {rounds.find((r: any) => Number(r.is_open) === 1)?.round_number}차
+                  </div>
+                )}
+
+                <div className="flex gap-2 bg-black/5 p-1.5 rounded-2xl w-fit">
+                  {[1, 2, 3].map(num => (
+                    <button
+                      key={num}
+                      onClick={() => setSelectedRound(num)}
+                      className={`px-6 py-2 rounded-xl text-sm font-bold transition-all ${selectedRound === num ? 'bg-white text-black shadow-sm' : 'text-black/40 hover:text-black'}`}
+                    >
+                      {num}차 심사
+                    </button>
+                  ))}
+                </div>
               </div>
-              <div className="flex items-center gap-3">
+
+              <div className="flex items-center gap-3 flex-wrap">
                 <div className="flex gap-1 bg-black/5 p-1 rounded-xl">
-                  <button 
+                  <button
                     onClick={() => handleToggleAllParticipation(true)}
                     className="px-3 py-1.5 text-[10px] font-bold bg-white text-emerald-600 rounded-lg shadow-sm hover:bg-emerald-50"
                   >
                     전체 참여
                   </button>
-                  <button 
+                  <button
                     onClick={() => handleToggleAllParticipation(false)}
                     className="px-3 py-1.5 text-[10px] font-bold bg-white text-red-600 rounded-lg shadow-sm hover:bg-red-50"
                   >
                     전체 제외
                   </button>
                 </div>
+
                 <div className="h-6 w-px bg-black/10" />
-                <select 
+
+                <select
                   value={orderingMode}
                   onChange={(e) => {
-                    const mode = e.target.value as any;
+                    const mode = e.target.value as 'id_asc' | 'id_desc' | 'manual';
                     setOrderingMode(mode);
                     if (mode === 'id_asc' || mode === 'id_desc') {
                       handleApplyAutoOrder(mode);
@@ -969,8 +1050,9 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
                   <option value="id_desc">학번역순 정렬</option>
                   <option value="manual">관리자 수동 설정</option>
                 </select>
+
                 {orderingMode === 'manual' && (
-                  <button 
+                  <button
                     onClick={handleApplyManualOrders}
                     className="px-6 py-2 bg-black text-white rounded-xl text-xs font-bold hover:bg-black/80 transition-all"
                   >
@@ -999,6 +1081,7 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
                   />
                 </div>
               </div>
+
               <div className="overflow-x-auto">
                 <table className="w-full text-left border-collapse">
                   <thead>
@@ -1014,55 +1097,55 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
                   <tbody className="divide-y divide-black/5">
                     {(Array.isArray(stats) ? [...stats] : [])
                       .sort((a, b) => {
-                        if (orderingMode === 'manual') return (manualOrders[a.user_id] || 999) - (manualOrders[b.user_id] || 999);
-                        if (orderingMode === 'id_asc') return a.student_id?.localeCompare(b.student_id) || 0;
-                        if (orderingMode === 'id_desc') return b.student_id?.localeCompare(a.student_id) || 0;
+                        if (orderingMode === 'manual') return (manualOrders[String(a.user_id)] || 999) - (manualOrders[String(b.user_id)] || 999);
+                        if (orderingMode === 'id_asc') return (a.student_id || '').localeCompare(b.student_id || '');
+                        if (orderingMode === 'id_desc') return (b.student_id || '').localeCompare(a.student_id || '');
                         return (a.presentation_order || 999) - (b.presentation_order || 999);
                       })
                       .map((s) => (
-                      <tr key={s.user_id} className={`hover:bg-black/[0.01] transition-colors ${s.is_participating ? 'bg-emerald-50/30' : ''}`}>
-                        <td className="px-6 py-4">
-                          <input
-                            type="checkbox"
-                            checked={!!s.is_participating}
-                            onChange={(e) => handleUpdateOrder(s.id, s.user_id, s.presentation_order || 0, e.target.checked)}
-                            className="w-5 h-5 rounded border-black/10 text-black focus:ring-black cursor-pointer"
-                          />
-                        </td>
-                        <td className="px-6 py-4">
-                          <input
-                            type="number"
-                            value={orderingMode === 'manual' ? (manualOrders[s.user_id] || 0) : (s.presentation_order || 0)}
-                            onChange={(e) => {
-                              const val = parseInt(e.target.value) || 0;
-                              if (orderingMode === 'manual') {
-                                handleManualOrderChange(s.user_id, val);
-                              } else {
-                                handleUpdateOrder(s.id, s.user_id, val);
-                              }
-                            }}
-                            className="w-16 px-2 py-1 bg-black/5 rounded-lg text-sm font-bold focus:outline-none focus:ring-2 focus:ring-black/10"
-                          />
-                        </td>
-                        <td className="px-6 py-4 text-sm font-mono">{s.student_id}</td>
-                        <td className="px-6 py-4 text-sm font-bold">{s.name}</td>
-                        <td className="px-6 py-4">
-                          {s.is_submitted ? (
-                            <span className="text-[10px] bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-bold">제출 완료</span>
-                          ) : (
-                            <span className="text-[10px] bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-bold">미제출</span>
-                          )}
-                        </td>
-                        <td className="px-6 py-4 text-sm">{s.title}</td>
-                      </tr>
-                    ))}
+                        <tr key={s.user_id} className={`hover:bg-black/[0.01] transition-colors ${s.is_participating ? 'bg-emerald-50/30' : ''}`}>
+                          <td className="px-6 py-4">
+                            <input
+                              type="checkbox"
+                              checked={!!s.is_participating}
+                              onChange={(e) => handleUpdateOrder(s.id, s.user_id, s.presentation_order || 0, e.target.checked)}
+                              className="w-5 h-5 rounded border-black/10 text-black focus:ring-black cursor-pointer"
+                            />
+                          </td>
+                          <td className="px-6 py-4">
+                            <input
+                              type="number"
+                              value={orderingMode === 'manual' ? (manualOrders[String(s.user_id)] || 0) : (s.presentation_order || 0)}
+                              onChange={(e) => {
+                                const val = parseInt(e.target.value) || 0;
+                                if (orderingMode === 'manual') {
+                                  handleManualOrderChange(s.user_id, val);
+                                } else {
+                                  handleUpdateOrder(s.id, s.user_id, val);
+                                }
+                              }}
+                              className="w-16 px-2 py-1 bg-black/5 rounded-lg text-sm font-bold focus:outline-none focus:ring-2 focus:ring-black/10"
+                            />
+                          </td>
+                          <td className="px-6 py-4 text-sm font-mono">{s.student_id}</td>
+                          <td className="px-6 py-4 text-sm font-bold">{s.name}</td>
+                          <td className="px-6 py-4">
+                            {s.is_submitted ? (
+                              <span className="text-[10px] bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-bold">제출 완료</span>
+                            ) : (
+                              <span className="text-[10px] bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-bold">미제출</span>
+                            )}
+                          </td>
+                          <td className="px-6 py-4 text-sm">{s.title}</td>
+                        </tr>
+                      ))}
                   </tbody>
                 </table>
               </div>
             </section>
           </motion.div>
         ) : activeTab === 'rounds' ? (
-          <motion.div 
+          <motion.div
             key="rounds"
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
@@ -1072,7 +1155,7 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
             <section className="bg-white p-8 rounded-3xl shadow-sm border border-black/5">
               <h3 className="text-xl font-bold mb-6">심사 차수 활성화 설정</h3>
               <p className="text-sm text-black/50 mb-8">관리자가 활성화한 차수만 학생이 기획안을 제출하거나 수정할 수 있습니다.</p>
-              
+
               <div className="space-y-4">
                 {Array.isArray(rounds) && rounds.map(r => (
                   <div key={r.round_number} className="flex items-center justify-between p-6 bg-black/[0.02] rounded-2xl border border-black/5">
@@ -1094,7 +1177,6 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
         ) : null}
       </AnimatePresence>
 
-      {/* Custom Confirmation Modal */}
       <AnimatePresence>
         {confirmModal.isOpen && (
           <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 overflow-y-auto">
@@ -1130,7 +1212,6 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
                     onClick={() => {
                       const action = confirmModal.onConfirm;
                       setConfirmModal(prev => ({ ...prev, isOpen: false }));
-                      // Delay the action slightly to allow modal exit animation and avoid alert conflicts
                       setTimeout(() => action(), 100);
                     }}
                     className={`flex-1 px-6 py-4 rounded-2xl font-bold text-white transition-all shadow-lg ${confirmModal.isDanger ? 'bg-red-600 hover:bg-red-700 shadow-red-600/20' : 'bg-black hover:bg-black/90 shadow-black/20'}`}
