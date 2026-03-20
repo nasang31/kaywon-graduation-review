@@ -8,7 +8,7 @@ import {
 
 interface JudgeDashboardProps {
   user: User;
-  forcedProposalId?: number | null;
+  forcedProposalId?: string | number | null;
 }
 
 // ── 스피너 아이콘 ──────────────────────────────────────────────────
@@ -16,7 +16,8 @@ function SpinnerIcon() {
   return (
     <svg
       className="animate-spin"
-      width={14} height={14}
+      width={14}
+      height={14}
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
@@ -29,15 +30,14 @@ function SpinnerIcon() {
 
 // ── 빈 평가 초기값 ────────────────────────────────────────────────
 const EMPTY_EVALUATION = {
-  text_grade:  '',
+  text_grade: '',
   work1_grade: '',
   work2_grade: '',
   work3_grade: '',
-  comment:     ''
+  comment: ''
 };
 
 // ── 0점(미입력) 항목 분모 제외 점수 계산 ─────────────────────────
-// 단일 평가자 객체를 받아 처리하는 공통 함수
 function calcJudgeScore(e: {
   text_grade?: string;
   work1_grade?: string;
@@ -45,7 +45,7 @@ function calcJudgeScore(e: {
   work3_grade?: string;
 }): number {
   const items = [
-    GRADE_SCORES[e.text_grade  as keyof typeof GRADE_SCORES],
+    GRADE_SCORES[e.text_grade as keyof typeof GRADE_SCORES],
     GRADE_SCORES[e.work1_grade as keyof typeof GRADE_SCORES],
     GRADE_SCORES[e.work2_grade as keyof typeof GRADE_SCORES],
     GRADE_SCORES[e.work3_grade as keyof typeof GRADE_SCORES],
@@ -56,18 +56,16 @@ function calcJudgeScore(e: {
     : valid.reduce((a, b) => a + b, 0) / valid.length;
 }
 
-// ✅ calcMyScore는 calcJudgeScore로 통일 — 산식 일관성 유지
-// 목록/순위의 학생 데이터 구조(my_xxx_grade)를 어댑터로 변환
 function calcMyScore(s: any): number {
   return calcJudgeScore({
-    text_grade:  s.my_text_grade,
+    text_grade: s.my_text_grade,
     work1_grade: s.my_work1_grade,
     work2_grade: s.my_work2_grade,
     work3_grade: s.my_work3_grade,
   });
 }
 
-// ── 전체 평가자 평균 (평가자 1인 평균의 평균) ─────────────────────
+// ── 전체 평가자 평균 ──────────────────────────────────────────────
 function calculateAverage(evals: any[]): string {
   if (!evals || evals.length === 0) return '0.00';
 
@@ -87,11 +85,11 @@ function parseDraft(raw: string): typeof EMPTY_EVALUATION | null {
   try {
     const p = JSON.parse(raw);
     return {
-      text_grade:  p.text_grade  || '',
+      text_grade: p.text_grade || '',
       work1_grade: p.work1_grade || '',
       work2_grade: p.work2_grade || '',
       work3_grade: p.work3_grade || '',
-      comment:     p.comment     || ''
+      comment: p.comment || ''
     };
   } catch {
     return null;
@@ -102,10 +100,14 @@ function parseDraft(raw: string): typeof EMPTY_EVALUATION | null {
 function UserIcon({ size }: { size: number }) {
   return (
     <svg
-      width={size} height={size}
-      viewBox="0 0 24 24" fill="none"
-      stroke="currentColor" strokeWidth="2"
-      strokeLinecap="round" strokeLinejoin="round"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
     >
       <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
       <circle cx="12" cy="7" r="4" />
@@ -113,25 +115,28 @@ function UserIcon({ size }: { size: number }) {
   );
 }
 
-// ═════════════════════════════════════════════════════════════════
 export default function JudgeDashboard({ user, forcedProposalId }: JudgeDashboardProps) {
-  const [selectedRound, setSelectedRound]           = useState(1);
-  const [students, setStudents]                     = useState<any[]>([]);
-  const [selectedProposal, setSelectedProposal]     = useState<Proposal | null>(null);
-  const [zoomImage, setZoomImage]                   = useState<string | null>(null);
-  const [zoomScale, setZoomScale]                   = useState(1);
-  const [evaluation, setEvaluation]                 = useState(EMPTY_EVALUATION);
-  const [isNavigating, setIsNavigating]             = useState(false);
-  const [navDirection, setNavDirection]             = useState<'prev' | 'next' | null>(null);
+  const [selectedRound, setSelectedRound] = useState(1);
+  const [students, setStudents] = useState<any[]>([]);
+  const [selectedProposal, setSelectedProposal] = useState<Proposal | null>(null);
+  const [zoomImage, setZoomImage] = useState<string | null>(null);
+  const [zoomScale, setZoomScale] = useState(1);
+  const [evaluation, setEvaluation] = useState(EMPTY_EVALUATION);
+  const [isNavigating, setIsNavigating] = useState(false);
+  const [navDirection, setNavDirection] = useState<'prev' | 'next' | null>(null);
   const [isSavingEvaluation, setIsSavingEvaluation] = useState(false);
-  const [showRanking, setShowRanking]               = useState(true);
-  const [isEditing, setIsEditing]                   = useState(false);
-  const [listScrollPos, setListScrollPos]           = useState(0);
-  const [lastSelectedId, setLastSelectedId]         = useState<number | null>(null);
+  const [showRanking, setShowRanking] = useState(true);
+  const [isEditing, setIsEditing] = useState(false);
+  const [listScrollPos, setListScrollPos] = useState(0);
+  const [lastSelectedId, setLastSelectedId] = useState<string | number | null>(null);
+  
+  const [rounds, setRounds] = useState<any[]>([]);
+  const [previousProposal, setPreviousProposal] = useState<any | null>(null);
+  const [showPreviousProposal, setShowPreviousProposal] = useState(true);
+  const didSetInitialRound = useRef(false);
 
   const latestRequestId = useRef(0);
 
-  // ── 타입 안전 작품 등급 세터 ────────────────────────────────────
   const setWorkGrade = (num: 1 | 2 | 3, grade: string) => {
     setEvaluation(prev => ({
       ...prev,
@@ -141,42 +146,40 @@ export default function JudgeDashboard({ user, forcedProposalId }: JudgeDashboar
     }));
   };
 
-  // ── 목록 복귀 시 스크롤 복원 ────────────────────────────────────
-useEffect(() => {
-  if (!selectedProposal && lastSelectedId) {
-    let frames = 0;
-    let rafId = 0;
-    let cancelled = false;
+  useEffect(() => {
+    if (!selectedProposal && lastSelectedId) {
+      let frames = 0;
+      let rafId = 0;
+      let cancelled = false;
 
-    const scroll = () => {
-      if (cancelled) return;
+      const scroll = () => {
+        if (cancelled) return;
 
-      const el = document.getElementById(`student-card-${lastSelectedId}`);
-      if (el) {
-        el.scrollIntoView({ behavior: 'auto', block: 'center' });
-      } else if (listScrollPos > 0) {
-        window.scrollTo(0, listScrollPos);
-      }
+        const el = document.getElementById(`student-card-${lastSelectedId}`);
+        if (el) {
+          el.scrollIntoView({ behavior: 'auto', block: 'center' });
+        } else if (listScrollPos > 0) {
+          window.scrollTo(0, listScrollPos);
+        }
 
-      frames++;
-      if (frames < 10) {
+        frames++;
+        if (frames < 10) {
+          rafId = requestAnimationFrame(scroll);
+        }
+      };
+
+      const t = setTimeout(() => {
         rafId = requestAnimationFrame(scroll);
-      }
-    };
+      }, 50);
 
-    const t = setTimeout(() => {
-      rafId = requestAnimationFrame(scroll);
-    }, 50);
+      return () => {
+        cancelled = true;
+        clearTimeout(t);
+        cancelAnimationFrame(rafId);
+      };
+    }
+  }, [selectedProposal, lastSelectedId, listScrollPos]);
 
-    return () => {
-      cancelled = true;
-      clearTimeout(t);
-      cancelAnimationFrame(rafId);
-    };
-  }
-}, [selectedProposal, lastSelectedId, listScrollPos]);
-
-  // ── 이미지 줌 시 body 스크롤 잠금 ──────────────────────────────
   useEffect(() => {
     if (zoomImage) {
       const y = window.scrollY;
@@ -196,13 +199,18 @@ useEffect(() => {
     };
   }, [zoomImage]);
 
-  useEffect(() => { fetchStudents(); }, [selectedRound]);
+  useEffect(() => {
+    fetchRounds();
+  }, []);
+
+  useEffect(() => {
+    fetchStudents();
+  }, [selectedRound]);
 
   useEffect(() => {
     if (forcedProposalId) handleSelectStudent(forcedProposalId);
   }, [forcedProposalId]);
 
-  // ── draft 자동저장 (편집 중일 때만) ────────────────────────────
   useEffect(() => {
     if (selectedProposal && isEditing) {
       localStorage.setItem(
@@ -210,26 +218,63 @@ useEffect(() => {
         JSON.stringify(evaluation)
       );
     }
-  }, [evaluation, selectedProposal, isEditing]);
+  }, [evaluation, selectedProposal, isEditing, user.id]);
 
-  // ───────────────────────────────────────────────────────────────
-  // API
-  // ───────────────────────────────────────────────────────────────
-  const fetchStudents = async () => {
+  const fetchRounds = async () => {
     try {
-      const res  = await fetch(`/api/students/${selectedRound}?judgeId=${user.id}`);
+      const res = await fetch('/api/admin/rounds');
       const data = await res.json();
-      setStudents(Array.isArray(data) ? data : []);
+
+      if (Array.isArray(data)) {
+        setRounds(data);
+
+        const activeRound = data.find((r: any) => Number(r.is_open) === 1);
+        if (activeRound && !didSetInitialRound.current) {
+          didSetInitialRound.current = true;
+          setSelectedRound(activeRound.round_number);
+        }
+      } else {
+        setRounds([]);
+      }
     } catch (err) {
-      console.error('Failed to fetch students:', err);
-      setStudents([]);
+      console.error('Failed to fetch rounds:', err);
+      setRounds([]);
     }
   };
 
-  const handleSelectStudent = async (
-    id: number,
-    direction: 'prev' | 'next' | null = null
-  ) => {
+  const fetchStudents = async () => {
+    try {
+      const res = await fetch(`/api/students/${selectedRound}?judgeId=${user.id}`);
+      const data = await res.json();
+      setStudents(Array.isArray(data) ? data : []);
+      setPreviousProposal(null);
+    } catch (err) {
+      console.error('Failed to fetch students:', err);
+      setStudents([]);
+      setPreviousProposal(null);
+    }
+  };
+
+  const fetchPreviousProposal = async (userId: number | string) => {
+    if (selectedRound <= 1) {
+      setPreviousProposal(null);
+      return;
+    }
+
+    try {
+      const res = await fetch(`/api/proposals/reference/${userId}/${selectedRound - 1}`);
+      const data = await res.json();
+      setPreviousProposal(data || null);
+    } catch (err) {
+      console.error('Failed to fetch previous proposal:', err);
+      setPreviousProposal(null);
+    }
+  };
+
+   const handleSelectStudent = async (
+  id: string | number,
+  direction: 'prev' | 'next' | null = null
+) => {
     if (!selectedProposal) setListScrollPos(window.scrollY);
     setLastSelectedId(id);
     setNavDirection(direction);
@@ -238,35 +283,37 @@ useEffect(() => {
 
     try {
       setIsNavigating(true);
-       const res = await fetch(`/api/proposals/${id}?judgeId=${user.id}&role=${user.role}`);
-if (!res.ok) {
-  alert('학생 정보를 불러오지 못했습니다.');
-  return;
-}
-const data = await res.json();
+      const res = await fetch(`/api/proposals/${id}?judgeId=${user.id}&role=${user.role}`);
+      if (!res.ok) {
+        alert('학생 정보를 불러오지 못했습니다.');
+        return;
+      }
+
+      const data = await res.json();
 
       if (requestId !== latestRequestId.current) return;
 
       setSelectedProposal(data);
+      await fetchPreviousProposal((data as any).user_id);
 
       const myEval = data.evaluations?.find((e: any) => e.judge_id === user.id);
 
       if (myEval) {
         setEvaluation({
-          text_grade:  myEval.text_grade  || '',
+          text_grade: myEval.text_grade || '',
           work1_grade: myEval.work1_grade || '',
           work2_grade: myEval.work2_grade || '',
           work3_grade: myEval.work3_grade || '',
-          comment:     myEval.comment     || ''
+          comment: myEval.comment || ''
         });
         setIsEditing(false);
       } else {
         const raw = localStorage.getItem(`eval_draft_${user.id}_${id}`);
         setEvaluation(
-  raw
-    ? (parseDraft(raw) ?? { ...EMPTY_EVALUATION })
-    : { ...EMPTY_EVALUATION }
-);
+          raw
+            ? (parseDraft(raw) ?? { ...EMPTY_EVALUATION })
+            : { ...EMPTY_EVALUATION }
+        );
         setIsEditing(true);
       }
     } catch (err) {
@@ -280,34 +327,35 @@ const data = await res.json();
   };
 
   const refreshCurrentProposal = async (proposalId: number | string) => {
-  try {
-    const res = await fetch(
-      `/api/proposals/${proposalId}?judgeId=${user.id}&role=${user.role}`
-    );
-    if (!res.ok) return;
+    try {
+      const res = await fetch(
+        `/api/proposals/${proposalId}?judgeId=${user.id}&role=${user.role}`
+      );
+      if (!res.ok) return;
 
-    const data = await res.json();
-    setSelectedProposal(data);
+      const data = await res.json();
+      setSelectedProposal(data);
+      await fetchPreviousProposal((data as any).user_id);
 
-    const myEval = data.evaluations?.find((e: any) => e.judge_id === user.id);
+      const myEval = data.evaluations?.find((e: any) => e.judge_id === user.id);
 
-    if (myEval) {
-      setEvaluation({
-        text_grade: myEval.text_grade || '',
-        work1_grade: myEval.work1_grade || '',
-        work2_grade: myEval.work2_grade || '',
-        work3_grade: myEval.work3_grade || '',
-        comment: myEval.comment || '',
-      });
-      setIsEditing(false);
-    } else {
-      setEvaluation({ ...EMPTY_EVALUATION });
-      setIsEditing(true);
+      if (myEval) {
+        setEvaluation({
+          text_grade: myEval.text_grade || '',
+          work1_grade: myEval.work1_grade || '',
+          work2_grade: myEval.work2_grade || '',
+          work3_grade: myEval.work3_grade || '',
+          comment: myEval.comment || '',
+        });
+        setIsEditing(false);
+      } else {
+        setEvaluation({ ...EMPTY_EVALUATION });
+        setIsEditing(true);
+      }
+    } catch (err) {
+      console.error('refreshCurrentProposal failed:', err);
     }
-  } catch (err) {
-    console.error('refreshCurrentProposal failed:', err);
-  }
-};
+  };
 
   const handleSubmitEvaluation = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -317,8 +365,12 @@ const data = await res.json();
   const saveEvaluationToServer = async () => {
     if (!selectedProposal) return;
 
-    if (!evaluation.text_grade || !evaluation.work1_grade ||
-        !evaluation.work2_grade || !evaluation.work3_grade) {
+    if (
+      !evaluation.text_grade ||
+      !evaluation.work1_grade ||
+      !evaluation.work2_grade ||
+      !evaluation.work3_grade
+    ) {
       alert('모든 항목의 등급을 선택해주세요.');
       return;
     }
@@ -326,27 +378,28 @@ const data = await res.json();
     setIsSavingEvaluation(true);
     try {
       const response = await fetch('/api/evaluations', {
-        method:  'POST',
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           proposalId: selectedProposal.id,
-          judgeId:    user.id,
+          judgeId: user.id,
           ...evaluation
         }),
       });
 
       if (!response.ok) {
-  const errorData = await response.json().catch(() => null);
-  alert(errorData?.error || '심사 저장에 실패했습니다. 다시 시도해주세요.');
-  return;
-}
+        const errorData = await response.json().catch(() => null);
+        alert(errorData?.error || '심사 저장에 실패했습니다. 다시 시도해주세요.');
+        return;
+      }
 
       localStorage.removeItem(`eval_draft_${user.id}_${selectedProposal.id}`);
       setIsEditing(false);
+
       await Promise.all([
-  fetchStudents(),
-  refreshCurrentProposal(selectedProposal.id),
-]);
+        fetchStudents(),
+        refreshCurrentProposal(selectedProposal.id),
+      ]);
     } catch (err) {
       console.error(err);
       alert('네트워크 오류가 발생했습니다.');
@@ -357,6 +410,7 @@ const data = await res.json();
 
   const handleCancelEvaluation = async () => {
     if (!selectedProposal || !confirm('심사 내역을 삭제하시겠습니까?')) return;
+
     setIsSavingEvaluation(true);
     try {
       const res = await fetch(
@@ -367,13 +421,15 @@ const data = await res.json();
         alert('심사 삭제에 실패했습니다. 다시 시도해주세요.');
         return;
       }
+
       alert('심사가 취소되었습니다.');
       localStorage.removeItem(`eval_draft_${user.id}_${selectedProposal.id}`);
       setEvaluation({ ...EMPTY_EVALUATION });
+
       await Promise.all([
-  fetchStudents(),
-  refreshCurrentProposal(selectedProposal.id),
-]);
+        fetchStudents(),
+        refreshCurrentProposal(selectedProposal.id),
+      ]);
     } catch (err) {
       console.error(err);
       alert('네트워크 오류가 발생했습니다.');
@@ -382,21 +438,15 @@ const data = await res.json();
     }
   };
 
-  // ═════════════════════════════════════════════════════════════════
-  // 상세 보기 화면
-  // ═════════════════════════════════════════════════════════════════
   if (selectedProposal) {
     const currentIndex = students.findIndex(s => s.id === selectedProposal.id);
-    const prevStudent  = currentIndex > 0                   ? students[currentIndex - 1] : null;
-    const nextStudent  = currentIndex < students.length - 1 ? students[currentIndex + 1] : null;
+    const prevStudent = currentIndex > 0 ? students[currentIndex - 1] : null;
+    const nextStudent = currentIndex < students.length - 1 ? students[currentIndex + 1] : null;
 
-    // 공통 버튼 비활성화 조건
     const isLocked = isNavigating || isSavingEvaluation;
 
     return (
       <div className="space-y-8 pb-20">
-
-        {/* ── 상단 네비게이션 ── */}
         <div className="flex justify-between items-center">
           <button
             onClick={() => setSelectedProposal(null)}
@@ -433,8 +483,6 @@ const data = await res.json();
         </div>
 
         <div className="space-y-8">
-
-          {/* ── 기획안 본문 ── */}
           {!selectedProposal.is_submitted ? (
             <section className="bg-white p-12 rounded-3xl shadow-sm border border-black/5 flex flex-col items-center justify-center text-center space-y-6">
               <div className="w-20 h-20 bg-red-50 text-red-600 rounded-3xl flex items-center justify-center shadow-inner">
@@ -469,10 +517,10 @@ const data = await res.json();
               <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
                 <div className="space-y-8">
                   {([
-                    { label: '선정 텍스트 명', value: selectedProposal.title,  multiline: false },
-                    { label: '작가',           value: selectedProposal.author, multiline: false },
-                    { label: '장르',           value: selectedProposal.genre,  multiline: false },
-                    { label: '줄거리',         value: selectedProposal.plot,   multiline: true  },
+                    { label: '선정 텍스트 명', value: selectedProposal.title, multiline: false },
+                    { label: '작가', value: selectedProposal.author, multiline: false },
+                    { label: '장르', value: selectedProposal.genre, multiline: false },
+                    { label: '줄거리', value: selectedProposal.plot, multiline: true },
                   ] as const).map(({ label, value, multiline }) => (
                     <div key={label}>
                       <h4 className="text-xs font-bold text-black/30 uppercase tracking-widest mb-3">{label}</h4>
@@ -486,8 +534,8 @@ const data = await res.json();
                 </div>
                 <div className="space-y-8">
                   {([
-                    { label: '주제',     value: selectedProposal.subject },
-                    { label: '선정이유', value: selectedProposal.reason  },
+                    { label: '주제', value: selectedProposal.subject },
+                    { label: '선정이유', value: selectedProposal.reason },
                   ] as const).map(({ label, value }) => (
                     <div key={label}>
                       <h4 className="text-xs font-bold text-black/30 uppercase tracking-widest mb-3">{label}</h4>
@@ -499,7 +547,44 @@ const data = await res.json();
             </section>
           )}
 
-          {/* ── 작품별 상세 ── */}
+          {selectedRound > 1 && previousProposal && (
+            <section className="bg-blue-50 border border-blue-100 rounded-3xl p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-bold text-blue-800">
+                  {selectedRound - 1}차 제출안 참고
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setShowPreviousProposal(v => !v)}
+                  className="px-3 py-1.5 bg-white border border-blue-100 rounded-xl text-xs font-bold hover:bg-blue-100 transition-all"
+                >
+                  {showPreviousProposal ? '숨기기' : '보기'}
+                </button>
+              </div>
+
+              {showPreviousProposal && (
+                <div className="space-y-3 text-sm text-black/70">
+                  <div><span className="font-bold">텍스트명:</span> {previousProposal.title || '-'}</div>
+                  <div><span className="font-bold">작가명:</span> {previousProposal.author || '-'}</div>
+                  <div><span className="font-bold">장르:</span> {previousProposal.genre || '-'}</div>
+                  <div><span className="font-bold">주제:</span> {previousProposal.subject || '-'}</div>
+                  <div><span className="font-bold">기획 의도:</span> {previousProposal.reason || '-'}</div>
+
+                  <div className="pt-2">
+                    <div className="font-bold mb-2">작품 제목</div>
+                    <ul className="list-disc pl-5 space-y-1">
+                      {(previousProposal.works || []).map((w: any, idx: number) => (
+                        <li key={idx}>
+                          {w.title || `작품 ${w.work_number ?? idx + 1}`}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              )}
+            </section>
+          )}
+
           {selectedProposal.is_submitted && (
             <div className="space-y-8">
               <h3 className="text-2xl font-bold px-4">작품별 상세 내용</h3>
@@ -526,9 +611,9 @@ const data = await res.json();
                     <div className="p-8 grid grid-cols-1 lg:grid-cols-2 gap-12">
                       <div className="space-y-6">
                         {([
-                          { label: '작업개요',     value: work.summary },
+                          { label: '작업개요', value: work.summary },
                           { label: '내용 및 목적', value: work.purpose },
-                          { label: '기대효과',     value: work.effect  },
+                          { label: '기대효과', value: work.effect },
                         ] as const).map(({ label, value }) => (
                           <div key={label}>
                             <h4 className="text-[10px] font-bold text-black/30 uppercase tracking-widest mb-2">{label}</h4>
@@ -585,7 +670,6 @@ const data = await res.json();
             </div>
           )}
 
-          {/* ── 평가 + 관리자 패널 ── */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             <div className="lg:col-span-2">
               {user.role !== 'admin' ? (
@@ -597,8 +681,6 @@ const data = await res.json();
 
                   <form onSubmit={handleSubmitEvaluation} className="space-y-8">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-
-                      {/* 텍스트 선정 등급 */}
                       <div className={!isEditing ? 'opacity-40' : ''}>
                         <label className="block text-xs font-bold text-black/40 uppercase mb-3">
                           텍스트 선정 등급
@@ -606,7 +688,9 @@ const data = await res.json();
                         <div className="grid grid-cols-3 gap-1">
                           {Object.keys(GRADE_SCORES).map(g => (
                             <button
-                              key={g} type="button" disabled={!isEditing}
+                              key={g}
+                              type="button"
+                              disabled={!isEditing}
                               onClick={() => setEvaluation(prev => ({ ...prev, text_grade: g }))}
                               className={`py-2 rounded-lg text-xs font-bold border transition-all
                                 ${evaluation.text_grade === g
@@ -620,7 +704,6 @@ const data = await res.json();
                         </div>
                       </div>
 
-                      {/* 작품 1~3 등급 */}
                       {([1, 2, 3] as const).map(num => (
                         <div key={num} className={!isEditing ? 'opacity-40' : ''}>
                           <label className="block text-xs font-bold text-black/40 uppercase mb-3">
@@ -629,7 +712,9 @@ const data = await res.json();
                           <div className="grid grid-cols-3 gap-1">
                             {Object.keys(GRADE_SCORES).map(g => (
                               <button
-                                key={g} type="button" disabled={!isEditing}
+                                key={g}
+                                type="button"
+                                disabled={!isEditing}
                                 onClick={() => setWorkGrade(num, g)}
                                 className={`py-2 rounded-lg text-xs font-bold border transition-all
                                   ${evaluation[`work${num}_grade` as keyof typeof evaluation] === g
@@ -645,7 +730,6 @@ const data = await res.json();
                       ))}
                     </div>
 
-                    {/* 심사평 */}
                     <div className={!isEditing ? 'opacity-40' : ''}>
                       <label className="block text-xs font-bold text-black/40 uppercase mb-2">종합 심사평</label>
                       <textarea
@@ -657,7 +741,6 @@ const data = await res.json();
                       />
                     </div>
 
-                    {/* 버튼 영역 */}
                     <div className="flex gap-3">
                       {!isEditing ? (
                         <div className="w-full flex gap-3">
@@ -668,7 +751,6 @@ const data = await res.json();
                           >
                             <FileText size={18} /> 심사 수정 시작하기
                           </button>
-                          {/* ✅ isNavigating도 함께 비활성화 */}
                           <button
                             type="button"
                             onClick={handleCancelEvaluation}
@@ -688,11 +770,11 @@ const data = await res.json();
                               );
                               if (myEval) {
                                 setEvaluation({
-                                  text_grade:  myEval.text_grade  || '',
+                                  text_grade: myEval.text_grade || '',
                                   work1_grade: myEval.work1_grade || '',
                                   work2_grade: myEval.work2_grade || '',
                                   work3_grade: myEval.work3_grade || '',
-                                  comment:     myEval.comment     || ''
+                                  comment: myEval.comment || ''
                                 });
                                 setIsEditing(false);
                               } else {
@@ -727,7 +809,6 @@ const data = await res.json();
               )}
             </div>
 
-            {/* ── 관리자 전체 평가 패널 ── */}
             <div className="lg:col-span-1 space-y-6">
               {user.role === 'admin' && (
                 <section className="bg-white p-8 rounded-3xl shadow-sm border border-black/5">
@@ -768,7 +849,6 @@ const data = await res.json();
           </div>
         </div>
 
-        {/* ── 하단 네비게이션 ── */}
         <div className="flex justify-between items-center pt-12 border-t border-black/5">
           <button
             onClick={() => setSelectedProposal(null)}
@@ -804,7 +884,6 @@ const data = await res.json();
           </div>
         </div>
 
-        {/* ── 이미지 줌 모달 ── */}
         <AnimatePresence>
           {zoomImage && (
             <div
@@ -819,14 +898,18 @@ const data = await res.json();
                   <button
                     onClick={e => { e.stopPropagation(); setZoomScale(prev => Math.max(0.5, prev - 0.25)); }}
                     className="w-10 h-10 flex items-center justify-center text-white hover:bg-white/10 rounded-lg transition-colors"
-                  >-</button>
+                  >
+                    -
+                  </button>
                   <div className="w-16 flex items-center justify-center text-white text-xs font-bold">
                     {Math.round(zoomScale * 100)}%
                   </div>
                   <button
                     onClick={e => { e.stopPropagation(); setZoomScale(prev => Math.min(5, prev + 0.25)); }}
                     className="w-10 h-10 flex items-center justify-center text-white hover:bg-white/10 rounded-lg transition-colors"
-                  >+</button>
+                  >
+                    +
+                  </button>
                 </div>
                 <button
                   className="px-6 py-2 bg-white text-black rounded-xl font-bold hover:bg-white/90 transition-all"
@@ -843,14 +926,19 @@ const data = await res.json();
                   animate={{ opacity: 1, scale: zoomScale }}
                   exit={{ opacity: 0, scale: 0.9 }}
                   transition={{ type: 'spring', stiffness: 500, damping: 50 }}
-                  drag dragMomentum={false} dragElastic={0}
+                  drag
+                  dragMomentum={false}
+                  dragElastic={0}
                   dragTransition={{ power: 0, timeConstant: 0 }}
-                  src={zoomImage} alt="Zoomed"
+                  src={zoomImage}
+                  alt="Zoomed"
                   className="max-w-none shadow-2xl rounded-sm select-none cursor-grab active:cursor-grabbing"
                   style={{
                     transformOrigin: 'center center',
-                    width: 'auto', height: 'auto',
-                    maxWidth: '90%', maxHeight: '90%'
+                    width: 'auto',
+                    height: 'auto',
+                    maxWidth: '90%',
+                    maxHeight: '90%'
                   }}
                 />
               </div>
@@ -864,9 +952,6 @@ const data = await res.json();
     );
   }
 
-  // ═════════════════════════════════════════════════════════════════
-  // 목록 화면
-  // ═════════════════════════════════════════════════════════════════
   return (
     <div className="space-y-8">
       <header className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
@@ -874,7 +959,13 @@ const data = await res.json();
           <h2 className="text-3xl font-bold tracking-tight">학생 기획안 심사</h2>
           <p className="text-black/50 mt-1">학생들의 기획안을 검토하고 점수를 부여하세요.</p>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-4 flex-wrap justify-end">
+          {rounds.some((r: any) => Number(r.is_open) === 1) && (
+            <div className="text-[11px] font-bold px-3 py-1 rounded-full bg-emerald-100 text-emerald-700">
+              현재 진행 차수: {rounds.find((r: any) => Number(r.is_open) === 1)?.round_number}차
+            </div>
+          )}
+
           <button
             onClick={() => setShowRanking(!showRanking)}
             className={`px-4 py-2 rounded-xl text-xs font-bold transition-all border
@@ -884,6 +975,7 @@ const data = await res.json();
           >
             {showRanking ? '순위 숨기기' : '내 순위 보기'}
           </button>
+
           <div className="flex gap-2 bg-black/5 p-1 rounded-xl">
             {[1, 2, 3].map(num => (
               <button
@@ -903,10 +995,11 @@ const data = await res.json();
         <div className={`flex-1 grid grid-cols-1 md:grid-cols-2 ${showRanking ? 'lg:grid-cols-2' : 'lg:grid-cols-3'} gap-6`}>
           {students.map(student => {
             const myScore = calcMyScore(student);
-  const isMyEvaluationCompleted =
-    student.my_is_final === true ||
-    student.my_is_final === 1 ||
-    student.my_is_final === '1';
+            const isMyEvaluationCompleted =
+              student.my_is_final === true ||
+              student.my_is_final === 1 ||
+              student.my_is_final === '1';
+
             return (
               <motion.div
                 key={student.id}
@@ -947,7 +1040,6 @@ const data = await res.json();
           })}
         </div>
 
-        {/* 순위 패널 */}
         {showRanking && (
           <aside className="w-full lg:w-80 space-y-6">
             <section className="bg-white p-6 rounded-3xl shadow-sm border border-black/5 sticky top-24">
@@ -959,48 +1051,48 @@ const data = await res.json();
                 (다른 교수님의 점수는 반영되지 않습니다.)
               </p>
               <div className="space-y-3">
-  {students
-    .filter(s =>
-      s.my_is_final === true ||
-      s.my_is_final === 1 ||
-      s.my_is_final === '1'
-    )
-    .map(s => ({ ...s, myScore: calcMyScore(s) }))
-    .sort((a, b) => b.myScore - a.myScore)
-    .map((student, idx) => (
-      <div
-        key={student.id}
-        onClick={() => handleSelectStudent(student.id)}
-        className="flex items-center gap-3 p-3 rounded-2xl hover:bg-black/5 transition-all cursor-pointer group"
-      >
-        <div className={`w-6 h-6 rounded-lg flex items-center justify-center text-[10px] font-bold
-          ${idx === 0 ? 'bg-amber-400 text-white'
-          : idx === 1 ? 'bg-slate-300 text-white'
-          : idx === 2 ? 'bg-orange-300 text-white'
-          : 'bg-black/5 text-black/40'}`}>
-          {idx + 1}
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="text-xs font-bold text-black group-hover:text-blue-600 transition-colors truncate">
-            {student.student_name}
-          </div>
-          <div className="text-[10px] text-black/40 truncate">{student.title}</div>
-        </div>
-        <div className="text-xs font-bold text-black/80">{student.myScore.toFixed(1)}</div>
-      </div>
-    ))}
+                {students
+                  .filter(s =>
+                    s.my_is_final === true ||
+                    s.my_is_final === 1 ||
+                    s.my_is_final === '1'
+                  )
+                  .map(s => ({ ...s, myScore: calcMyScore(s) }))
+                  .sort((a, b) => b.myScore - a.myScore)
+                  .map((student, idx) => (
+                    <div
+                      key={student.id}
+                      onClick={() => handleSelectStudent(student.id)}
+                      className="flex items-center gap-3 p-3 rounded-2xl hover:bg-black/5 transition-all cursor-pointer group"
+                    >
+                      <div className={`w-6 h-6 rounded-lg flex items-center justify-center text-[10px] font-bold
+                        ${idx === 0 ? 'bg-amber-400 text-white'
+                          : idx === 1 ? 'bg-slate-300 text-white'
+                          : idx === 2 ? 'bg-orange-300 text-white'
+                          : 'bg-black/5 text-black/40'}`}>
+                        {idx + 1}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-xs font-bold text-black group-hover:text-blue-600 transition-colors truncate">
+                          {student.student_name}
+                        </div>
+                        <div className="text-[10px] text-black/40 truncate">{student.title}</div>
+                      </div>
+                      <div className="text-xs font-bold text-black/80">{student.myScore.toFixed(1)}</div>
+                    </div>
+                  ))}
 
-  {students.filter(s =>
-    s.my_is_final === true ||
-    s.my_is_final === 1 ||
-    s.my_is_final === '1'
-  ).length === 0 && (
-    <div className="text-center py-12 text-black/20">
-      <p className="text-xs font-medium">아직 평가한 학생이 없습니다.</p>
-    </div>
-  )}
-</div>
-                      </section>
+                {students.filter(s =>
+                  s.my_is_final === true ||
+                  s.my_is_final === 1 ||
+                  s.my_is_final === '1'
+                ).length === 0 && (
+                  <div className="text-center py-12 text-black/20">
+                    <p className="text-xs font-medium">아직 평가한 학생이 없습니다.</p>
+                  </div>
+                )}
+              </div>
+            </section>
           </aside>
         )}
       </div>
