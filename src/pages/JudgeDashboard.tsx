@@ -3,7 +3,7 @@ import { User, Proposal, GRADE_SCORES } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   ChevronRight, Star, MessageSquare, ExternalLink,
-  ArrowLeft, FileText, ShieldCheck, BarChart3
+  ArrowLeft, FileText, ShieldCheck, BarChart3, Key
 } from 'lucide-react';
 
 interface JudgeDashboardProps {
@@ -126,6 +126,8 @@ export default function JudgeDashboard({ user, forcedProposalId }: JudgeDashboar
   const [navDirection, setNavDirection] = useState<'prev' | 'next' | null>(null);
   const [isSavingEvaluation, setIsSavingEvaluation] = useState(false);
   const [showRanking, setShowRanking] = useState(true);
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [passwords, setPasswords] = useState({ current: '', new: '', confirm: '' });
   const [isEditing, setIsEditing] = useState(false);
   const [listScrollPos, setListScrollPos] = useState(0);
   const [lastSelectedId, setLastSelectedId] = useState<string | number | null>(null);
@@ -448,6 +450,33 @@ export default function JudgeDashboard({ user, forcedProposalId }: JudgeDashboar
     }
   };
 
+  const handlePasswordChange = async (e: React.FormEvent) => {
+  e.preventDefault();
+
+  if (passwords.new !== passwords.confirm) {
+    alert('새 비밀번호가 일치하지 않습니다.');
+    return;
+  }
+
+  try {
+    const res = await fetch('/api/change-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: user.id, newPassword: passwords.new }),
+    });
+
+    if (res.ok) {
+      alert('비밀번호가 변경되었습니다.');
+      setShowPasswordModal(false);
+      setPasswords({ current: '', new: '', confirm: '' });
+    } else {
+      alert('비밀번호 변경에 실패했습니다.');
+    }
+  } catch (err) {
+    alert('비밀번호 변경에 실패했습니다.');
+  }
+};
+  
   if (selectedProposal) {
     const currentIndex = students.findIndex(s => s.id === selectedProposal.id);
     const prevStudent = currentIndex > 0 ? students[currentIndex - 1] : null;
@@ -970,6 +999,12 @@ export default function JudgeDashboard({ user, forcedProposalId }: JudgeDashboar
           <p className="text-black/50 mt-1">학생들의 기획안을 검토하고 점수를 부여하세요.</p>
         </div>
         <div className="flex items-center gap-4 flex-wrap justify-end">
+          <button
+  onClick={() => setShowPasswordModal(true)}
+  className="flex items-center gap-2 px-4 py-2 bg-white border border-black/10 rounded-xl text-xs font-bold hover:bg-black/5 transition-all"
+>
+  <Key size={14} /> 비밀번호 변경
+</button>
           {rounds.some((r: any) => Number(r.is_open) === 1) && (
             <div className="text-[11px] font-bold px-3 py-1 rounded-full bg-emerald-100 text-emerald-700">
               현재 진행 차수: {rounds.find((r: any) => Number(r.is_open) === 1)?.round_number}차
@@ -1107,6 +1142,67 @@ export default function JudgeDashboard({ user, forcedProposalId }: JudgeDashboar
         )}
       </div>
 
+            <AnimatePresence>
+        {showPasswordModal && (
+          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-3xl p-8 w-full max-w-md shadow-2xl"
+            >
+              <h3 className="text-xl font-bold mb-6 flex items-center gap-2">
+                <Key size={20} /> 비밀번호 변경
+              </h3>
+
+              <form onSubmit={handlePasswordChange} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-black/40 uppercase mb-2">
+                    새 비밀번호
+                  </label>
+                  <input
+                    type="password"
+                    value={passwords.new || ''}
+                    onChange={e => setPasswords({ ...passwords, new: e.target.value })}
+                    className="w-full px-4 py-2.5 rounded-xl border border-black/10 focus:ring-2 focus:ring-black/5 outline-none"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-black/40 uppercase mb-2">
+                    새 비밀번호 확인
+                  </label>
+                  <input
+                    type="password"
+                    value={passwords.confirm || ''}
+                    onChange={e => setPasswords({ ...passwords, confirm: e.target.value })}
+                    className="w-full px-4 py-2.5 rounded-xl border border-black/10 focus:ring-2 focus:ring-black/5 outline-none"
+                    required
+                  />
+                </div>
+
+                <div className="flex gap-2 pt-4">
+                  <button
+                    type="button"
+                    onClick={() => setShowPasswordModal(false)}
+                    className="flex-1 py-3 rounded-xl font-bold border border-black/10 hover:bg-black/5 transition-all"
+                  >
+                    취소
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex-1 bg-black text-white py-3 rounded-xl font-bold hover:bg-black/90 transition-all"
+                  >
+                    변경하기
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+      
       {students.length === 0 && (
         <div className="text-center py-20 bg-white rounded-3xl border border-dashed border-black/10">
           <p className="text-black/30">아직 제출된 기획안이 없습니다.</p>
