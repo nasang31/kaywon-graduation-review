@@ -9,6 +9,8 @@ import {
 interface JudgeDashboardProps {
   user: User;
   forcedProposalId?: string | number | null;
+  entrySource?: 'admin' | 'judge-list';
+  onBackToAdminStats?: () => void;
 }
 
 // ── 스피너 아이콘 ──────────────────────────────────────────────────
@@ -115,7 +117,12 @@ function UserIcon({ size }: { size: number }) {
   );
 }
 
-export default function JudgeDashboard({ user, forcedProposalId }: JudgeDashboardProps) {
+export default function JudgeDashboard({
+  user,
+  forcedProposalId,
+  entrySource = 'judge-list',
+  onBackToAdminStats
+}: JudgeDashboardProps) {
   const [selectedRound, setSelectedRound] = useState(1);
   const [students, setStudents] = useState<any[]>([]);
   const [selectedProposal, setSelectedProposal] = useState<Proposal | null>(null);
@@ -515,17 +522,31 @@ export default function JudgeDashboard({ user, forcedProposalId }: JudgeDashboar
       return;
     }
 
-    alert('해당 차수 제출안이 초기화되었습니다.');
+   alert('해당 차수 제출안이 초기화되었습니다.');
 
-    await fetchStudents();
-    setPreviousProposal(null);
-    setSelectedProposal(null);
+await fetchStudents();
+setPreviousProposal(null);
+
+if (entrySource === 'admin' && onBackToAdminStats) {
+  onBackToAdminStats();
+} else {
+  setSelectedProposal(null);
+}
   } catch (err) {
     console.error(err);
     alert('네트워크 오류가 발생했습니다.');
   } finally {
     setIsSavingEvaluation(false);
   }
+};
+
+  const handleBackFromDetail = () => {
+  if (entrySource === 'admin' && onBackToAdminStats) {
+    onBackToAdminStats();
+    return;
+  }
+
+  setSelectedProposal(null);
 };
   
   const handlePasswordChange = async (e: React.FormEvent) => {
@@ -566,7 +587,7 @@ export default function JudgeDashboard({ user, forcedProposalId }: JudgeDashboar
       <div className="space-y-8 pb-20">
         <div className="flex justify-between items-center">
           <button
-            onClick={() => setSelectedProposal(null)}
+           onClick={handleBackFromDetail}
             className="flex items-center gap-2 text-black/50 hover:text-black transition-colors"
           >
             <ArrowLeft size={20} /> 목록으로 돌아가기
@@ -1007,7 +1028,7 @@ export default function JudgeDashboard({ user, forcedProposalId }: JudgeDashboar
 
         <div className="flex justify-between items-center pt-12 border-t border-black/5">
           <button
-            onClick={() => setSelectedProposal(null)}
+            onClick={handleBackFromDetail}
             className="flex items-center gap-2 text-black/50 hover:text-black transition-colors"
           >
             <ArrowLeft size={20} /> 목록으로 돌아가기
