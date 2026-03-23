@@ -170,20 +170,24 @@ async function ensureSchema(): Promise<void> {
     )
   `);
 
-  await db.query(`
+ 	  await db.query(`
     CREATE TABLE IF NOT EXISTS evaluations (
       id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       proposal_id UUID NOT NULL REFERENCES proposals(id) ON DELETE CASCADE,
       judge_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      scores      JSONB NOT NULL DEFAULT '{}',
+      text_grade  VARCHAR(5),
+      work1_grade VARCHAR(5),
+      work2_grade VARCHAR(5),
+      work3_grade VARCHAR(5),
       comment     TEXT,
       is_final    BOOLEAN NOT NULL DEFAULT FALSE,
-      total_score NUMERIC(6,2),
+      total_score NUMERIC(5,2),
       created_at  TIMESTAMPTZ DEFAULT NOW(),
       updated_at  TIMESTAMPTZ DEFAULT NOW(),
       UNIQUE(proposal_id, judge_id)
     )
   `);
+
 
   await db.query(`
     CREATE TABLE IF NOT EXISTS presentation_orders (
@@ -1089,24 +1093,36 @@ app.get(
   }
 );
 
-app.post(
+	app.post(
   "/api/evaluations",
   authMiddleware,
   async (req: AuthenticatedRequest, res: Response) => {
     const user = req.user!;
-    const { proposal_id, scores, comment, is_final } = req.body as {
+    const {
+      proposal_id,
+      text_grade,
+      work1_grade,
+      work2_grade,
+      work3_grade,
+      comment,
+      is_final,
+    } = req.body as {
       proposal_id?: string;
-      scores?: Record<string, string>;
+      text_grade?: string;
+      work1_grade?: string;
+      work2_grade?: string;
+      work3_grade?: string;
       comment?: string;
       is_final?: boolean;
     };
-    if (!proposal_id || !scores) {
-      res.status(400).json({ error: "proposal_id와 scores가 필요합니다." });
+
+    if (!proposal_id) {
+      res.status(400).json({ error: "proposal_id가 필요합니다." });
       return;
     }
 
     // 점수 계산: null이 아닌 항목만 평균 (F=0 포함)
-    const scoreValues = Object.values(scores)
+    const scoreValues = [text_grade, work1_grade, work2_grade, work3_grade]
       .map((g) => scoreOrNull(g))
       .filter((v): v is number => v !== null);
     const totalScore =
@@ -1125,39 +1141,62 @@ app.post(
       if (existing.rows.length > 0) {
         if (existing.rows[0].is_final && user.role !== "admin") {
           await client.query("ROLLBACK");
-          res
-            .status(403)
-            .json({ error: "최종 제출된 평가는 수정할 수 없습니다." });
+          res.status(403).json({ error: "최종 제출된 평가는 수정할 수 없습니다." });
           return;
         }
-        // is_final은 명시적으로 전달된 경우에만 업데이트
+
         if (is_final !== undefined) {
           result = await client.query(
             `UPDATE evaluations
-             SET scores=$1, comment=$2, total_score=$3, is_final=$4, updated_at=NOW()
-             WHERE proposal_id=$5 AND judge_id=$6
+             SET text_grade=$1, work1_grade=$2, work2_grade=$3, work3_grade=$4,
+                 comment=$5, total_score=$6, is_final=$7, updated_at=NOW()
+             WHERE proposal_id=$8 AND judge_id=$9
              RETURNING *`,
-            [scores, comment ?? null, totalScore, is_final, proposal_id, user.id]
+            [
+              text_grade ?? null,
+              work1_grade ?? null,
+              work2_grade ?? null,
+              work3_grade ?? null,
+              comment ?? null,
+              totalScore,
+              is_final,
+              proposal_id,
+              user.id,
+            ]
           );
         } else {
           result = await client.query(
             `UPDATE evaluations
-             SET scores=$1, comment=$2, total_score=$3, updated_at=NOW()
-             WHERE proposal_id=$4 AND judge_id=$5
+             SET text_grade=$1, work1_grade=$2, work2_grade=$3, work3_grade=$4,
+                 comment=$5, total_score=$6, updated_at=NOW()
+             WHERE proposal_id=$7 AND judge_id=$8
              RETURNING *`,
-            [scores, comment ?? null, totalScore, proposal_id, user.id]
+            [
+              text_grade ?? null,
+              work1_grade ?? null,
+              work2_grade ?? null,
+              work3_grade ?? null,
+              comment ?? null,
+              totalScore,
+              proposal_id,
+              user.id,
+            ]
           );
         }
       } else {
         result = await client.query(
           `INSERT INTO evaluations
-             (proposal_id, judge_id, scores, comment, total_score, is_final)
-           VALUES ($1, $2, $3, $4, $5, $6)
+             (proposal_id, judge_id, text_grade, work1_grade, work2_grade, work3_grade,
+              comment, total_score, is_final)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
            RETURNING *`,
           [
             proposal_id,
             user.id,
-            scores,
+            text_grade ?? null,
+            work1_grade ?? null,
+            work2_grade ?? null,
+            work3_grade ?? null,
             comment ?? null,
             totalScore,
             is_final ?? false,
@@ -1175,6 +1214,7 @@ app.post(
     }
   }
 );
+
 
 // 평가 삭제 (본인)
 app.delete(
