@@ -25,7 +25,14 @@ declare global {
 
 const app = express();
 const PORT = parseInt(process.env.PORT || "3000", 10);
-const JWT_SECRET = process.env.JWT_SECRET || "your-secret-key-change-this-in-production";
+
+// ✅ JWT_SECRET 환경변수 없으면 서버 시작 거부
+if (!process.env.JWT_SECRET) {
+  console.error("[FATAL] JWT_SECRET 환경변수가 설정되지 않았습니다. 서버를 시작할 수 없습니다.");
+  process.exit(1);
+}
+const JWT_SECRET = process.env.JWT_SECRET;
+
 const IS_PROD = process.env.NODE_ENV === "production";
 
 function createPool() {
@@ -130,13 +137,19 @@ function normalizeIsFinal(value: any, fallbackWhenUndefined = true) {
   return value === true || value === "true" || value === 1 || value === "1";
 }
 
+// ✅ 알 수 없는 등급값은 null 반환, F는 정상적으로 0 반환
 function scoreOrNull(grade: any): number | null {
   if (grade === undefined || grade === null || grade === "") return null;
-  return gradeMap[String(grade)] ?? 0;
+  const score = gradeMap[String(grade)];
+  if (score === undefined) {
+    console.warn(`[scoreOrNull] 알 수 없는 등급값: "${grade}"`);
+    return null;
+  }
+  return score;
 }
 
 function average(values: Array<number | null | undefined>) {
-  const filtered = values.filter((v): v is number => typeof v === "number" && !Number.isNaN(v));
+  const filtered = values.filter((v): v is number => typeof v === "number" && v >= 0 && !Number.isNaN(v));
   if (filtered.length === 0) return 0;
   return filtered.reduce((acc, v) => acc + v, 0) / filtered.length;
 }
@@ -200,9 +213,7 @@ async function uploadImageToSupabase(file: Express.Multer.File) {
       cacheControl: "3600",
     });
 
-  if (error) {
-    throw error;
-  }
+  if (error) throw error;
 
   const { data } = supabase.storage
     .from(SUPABASE_STORAGE_BUCKET)
@@ -315,13 +326,9 @@ async function ensureSchema() {
     ALTER TABLE evaluations ADD COLUMN IF NOT EXISTS finalized_at timestamptz;
   `);
 
-  // 기존 데이터 호환: 예전 시스템의 평가는 final 저장으로 간주
-  await db.exec(`
-    UPDATE evaluations
-    SET is_final = true,
-        finalized_at = COALESCE(finalized_at, created_at, now())
-    WHERE is_final IS NULL OR is_final = false;
-  `);
+  // ✅ is_final 강제 업데이트 블록 제거 — 서버 재시작 시 임시 저장 평가가
+  //    의도치 않게 최종 확정되는 버그 방지. 1차 심사 데이터는 이미 is_final=true로
+  //    저장되어 있으므로 이 코드 제거가 기존 데이터에 영향 없음.
 
   const roundCount = await db.get("SELECT COUNT(*)::int as count FROM rounds") as any;
   if (!roundCount || Number(roundCount.count) === 0) {
@@ -460,16 +467,24 @@ app.post("/api/admin/rounds/toggle", authenticate, authorize(["admin"]), async (
   }
 });
 
+// ✅ 트랜잭션 추가 — 삭제 도중 오류 시 부분 삭제 방지
 app.post("/api/admin/clear-data", authenticate, authorize(["admin"]), async (_req, res) => {
+  const client = await pgPool.connect();
   try {
-    await db.run("DELETE FROM work_images");
-    await db.run("DELETE FROM works");
-    await db.run("DELETE FROM evaluations");
-    await db.run("DELETE FROM proposals");
-    await db.run("DELETE FROM users WHERE role != 'admin'");
+    await client.query("BEGIN");
+    await client.query("DELETE FROM work_images");
+    await client.query("DELETE FROM works");
+    await client.query("DELETE FROM evaluations");
+    await client.query("DELETE FROM proposals");
+    await client.query("DELETE FROM users WHERE role != 'admin'");
+    await client.query("COMMIT");
     res.json({ success: true });
-  } catch (_err) {
-    res.status(500).json({ error: "데이터 초기화 실패" });
+  } catch (err: any) {
+    await client.query("ROLLBACK");
+    console.error("[ADMIN clear-data]", err);
+    res.status(500).json({ error: "데이터 초기화 실패: " + err.message });
+  } finally {
+    client.release();
   }
 });
 
@@ -502,26 +517,10 @@ app.post("/api/admin/seed", authenticate, authorize(["admin"]), async (_req, res
 
       for (let roundNum = 1; roundNum <= 3; roundNum++) {
         await db.run(
-          `
-          INSERT INTO proposals (user_id, round_number, student_id, name, career_path, title, author, genre, plot, subject, reason, is_submitted, presentation_order, is_participating)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          `,
-          [
-            userId,
-            roundNum,
-            studentId,
-            name,
-            "공간 연출가",
-            `졸업작품 ${i}`,
-            "본인",
-            "공연/전시",
-            `${name}의 ${roundNum}차 줄거리`,
-            `${name}의 ${roundNum}차 주제`,
-            `${name}의 ${roundNum}차 기획의도`,
-            1,
-            i,
-            1,
-          ]
+          `INSERT INTO proposals (user_id, round_number, student_id, name, career_path, title, author, genre, plot, subject, reason, is_submitted, presentation_order, is_participating)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [userId, roundNum, studentId, name, "공간 연출가", `졸업작품 ${i}`, "본인", "공연/전시",
+           `${name}의 ${roundNum}차 줄거리`, `${name}의 ${roundNum}차 주제`, `${name}의 ${roundNum}차 기획의도`, 1, i, 1]
         );
 
         const proposal = await db.get("SELECT id FROM proposals WHERE user_id = ? AND round_number = ?", [userId, roundNum]) as any;
@@ -529,20 +528,9 @@ app.post("/api/admin/seed", authenticate, authorize(["admin"]), async (_req, res
 
         for (let j = 1; j <= 3; j++) {
           await db.run(
-            `
-            INSERT INTO works (proposal_id, work_number, title, category, summary, keywords, purpose, effect)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            `,
-            [
-              proposalId,
-              j,
-              `작품 ${j}`,
-              "공간설계",
-              `${name}의 작품 ${j} 요약`,
-              "공간,무대,연출",
-              "졸업작품 구현",
-              "공간적 효과 제안",
-            ]
+            `INSERT INTO works (proposal_id, work_number, title, category, summary, keywords, purpose, effect)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            [proposalId, j, `작품 ${j}`, "공간설계", `${name}의 작품 ${j} 요약`, "공간,무대,연출", "졸업작품 구현", "공간적 효과 제안"]
           );
 
           const work = await db.get("SELECT id FROM works WHERE proposal_id = ? AND work_number = ?", [proposalId, j]) as any;
@@ -551,28 +539,14 @@ app.post("/api/admin/seed", authenticate, authorize(["admin"]), async (_req, res
 
         for (const judge of judges) {
           await db.run(
-            `
-            INSERT INTO evaluations (proposal_id, judge_id, text_grade, work1_grade, work2_grade, work3_grade, comment, is_final, finalized_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, now())
-            ON CONFLICT (proposal_id, judge_id) DO UPDATE SET
-              text_grade = EXCLUDED.text_grade,
-              work1_grade = EXCLUDED.work1_grade,
-              work2_grade = EXCLUDED.work2_grade,
-              work3_grade = EXCLUDED.work3_grade,
-              comment = EXCLUDED.comment,
-              is_final = true,
-              finalized_at = now()
-            `,
-            [
-              proposalId,
-              judge.id,
-              randomGrade(),
-              randomGrade(),
-              randomGrade(),
-              randomGrade(),
-              `${roundNum}차 심사평: ${name}의 작품은 인상적입니다. (by ${judge.name})`,
-              true,
-            ]
+            `INSERT INTO evaluations (proposal_id, judge_id, text_grade, work1_grade, work2_grade, work3_grade, comment, is_final, finalized_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, now())
+             ON CONFLICT (proposal_id, judge_id) DO UPDATE SET
+               text_grade = EXCLUDED.text_grade, work1_grade = EXCLUDED.work1_grade,
+               work2_grade = EXCLUDED.work2_grade, work3_grade = EXCLUDED.work3_grade,
+               comment = EXCLUDED.comment, is_final = true, finalized_at = now()`,
+            [proposalId, judge.id, randomGrade(), randomGrade(), randomGrade(), randomGrade(),
+             `${roundNum}차 심사평: ${name}의 작품은 인상적입니다. (by ${judge.name})`, true]
           );
         }
       }
@@ -618,26 +592,24 @@ app.delete("/api/admin/users/:id", authenticate, authorize(["admin"]), async (re
     if (!user) return res.status(404).json({ error: "사용자를 찾을 수 없습니다." });
     if (user.username === "admin") return res.status(403).json({ error: "관리자 계정은 삭제할 수 없습니다." });
 
-    await db.run(
-      `
-      DELETE FROM work_images 
-      WHERE work_id IN (
-        SELECT id FROM works 
-        WHERE proposal_id IN (
-          SELECT id FROM proposals WHERE user_id = ?
-        )
-      )
-      `,
-      [userId]
-    );
-    await db.run(
-      `DELETE FROM works WHERE proposal_id IN (SELECT id FROM proposals WHERE user_id = ?)`,
-      [userId]
-    );
-    await db.run(
-      `DELETE FROM evaluations WHERE proposal_id IN (SELECT id FROM proposals WHERE user_id = ?)`,
-      [userId]
-    );
+    // ✅ ANY($1::uuid[]) 패턴 사용 — 동적 placeholders 대신 안전하고 간결하게
+    const userProposals = await db.query("SELECT id FROM proposals WHERE user_id = ?", [userId]) as any[];
+    const proposalIds = userProposals.map((p: any) => p.id);
+
+    if (proposalIds.length > 0) {
+      const workRows = await pgPool.query(
+        `SELECT id FROM works WHERE proposal_id = ANY($1::uuid[])`,
+        [proposalIds]
+      );
+      const workIds = workRows.rows.map((w: any) => w.id);
+
+      if (workIds.length > 0) {
+        await pgPool.query(`DELETE FROM work_images WHERE work_id = ANY($1::uuid[])`, [workIds]);
+      }
+      await pgPool.query(`DELETE FROM works WHERE proposal_id = ANY($1::uuid[])`, [proposalIds]);
+      await pgPool.query(`DELETE FROM evaluations WHERE proposal_id = ANY($1::uuid[])`, [proposalIds]);
+    }
+
     await db.run("DELETE FROM proposals WHERE user_id = ?", [userId]);
     await db.run("DELETE FROM evaluations WHERE judge_id = ?", [userId]);
     const result = await db.run("DELETE FROM users WHERE id = ?", [userId]);
@@ -678,61 +650,27 @@ app.post("/api/proposals", authenticate, authorize(["student", "admin"]), async 
     if (existingProposal) {
       proposalId = existingProposal.id;
 
-      // 핵심: proposal 자체는 삭제하지 않고 UPDATE만 수행
       await db.run(
-        `
-        UPDATE proposals
-        SET student_id = ?,
-            name = ?,
-            career_path = ?,
-            title = ?,
-            author = ?,
-            genre = ?,
-            plot = ?,
-            subject = ?,
-            reason = ?,
-            is_submitted = ?
-        WHERE id = ?
-        `,
-        [
-          studentId,
-          name,
-          careerPath,
-          title,
-          author,
-          genre,
-          plot,
-          subject,
-          reason,
-          isSubmittedValue,
-          proposalId
-        ]
+        `UPDATE proposals
+         SET student_id = ?, name = ?, career_path = ?, title = ?, author = ?, genre = ?,
+             plot = ?, subject = ?, reason = ?, is_submitted = ?
+         WHERE id = ?`,
+        [studentId, name, careerPath, title, author, genre, plot, subject, reason, isSubmittedValue, proposalId]
       );
 
-      // works / images만 교체
       const workIds = await db.query("SELECT id FROM works WHERE proposal_id = ?", [proposalId]) as any[];
-      for (const w of workIds) {
-        await db.run("DELETE FROM work_images WHERE work_id = ?", [w.id]);
+      if (workIds.length > 0) {
+        await pgPool.query(
+          `DELETE FROM work_images WHERE work_id = ANY($1::uuid[])`,
+          [workIds.map((w: any) => w.id)]
+        );
       }
       await db.run("DELETE FROM works WHERE proposal_id = ?", [proposalId]);
     } else {
-      const presentationOrder = 0;
-      const isParticipating = 0;
-
       await db.run(
-        `
-        INSERT INTO proposals (
-          user_id, round_number, student_id, name, career_path,
-          title, author, genre, plot, subject, reason,
-          is_submitted, presentation_order, is_participating
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `,
-        [
-          userId, roundNumber, studentId, name, careerPath,
-          title, author, genre, plot, subject, reason,
-          isSubmittedValue, presentationOrder, isParticipating
-        ]
+        `INSERT INTO proposals (user_id, round_number, student_id, name, career_path, title, author, genre, plot, subject, reason, is_submitted, presentation_order, is_participating)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [userId, roundNumber, studentId, name, careerPath, title, author, genre, plot, subject, reason, isSubmittedValue, 0, 0]
       );
 
       const proposal = await db.get(
@@ -745,20 +683,9 @@ app.post("/api/proposals", authenticate, authorize(["student", "admin"]), async 
 
     for (const work of normalizeWorks(works)) {
       await db.run(
-        `
-        INSERT INTO works (proposal_id, work_number, title, category, summary, keywords, purpose, effect)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        `,
-        [
-          proposalId,
-          work.workNumber,
-          work.title,
-          work.category,
-          work.summary,
-          work.keywords,
-          work.purpose,
-          work.effect
-        ]
+        `INSERT INTO works (proposal_id, work_number, title, category, summary, keywords, purpose, effect)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [proposalId, work.workNumber, work.title, work.category, work.summary, work.keywords, work.purpose, work.effect]
       );
 
       const workData = await db.get(
@@ -766,10 +693,8 @@ app.post("/api/proposals", authenticate, authorize(["student", "admin"]), async 
         [proposalId, work.workNumber]
       ) as any;
 
-      const workId = workData.id;
-
       for (const imgUrl of work.images) {
-        await db.run("INSERT INTO work_images (work_id, url) VALUES (?, ?)", [workId, imgUrl]);
+        await db.run("INSERT INTO work_images (work_id, url) VALUES (?, ?)", [workData.id, imgUrl]);
       }
     }
 
@@ -821,9 +746,7 @@ app.get("/api/proposals/reference/:userId/:roundNumber", authenticate, async (re
       [userId, roundNumber]
     ) as any;
 
-    if (!proposal) {
-      return res.json(null);
-    }
+    if (!proposal) return res.json(null);
 
     const works = await db.query(
       "SELECT * FROM works WHERE proposal_id = ? ORDER BY work_number ASC",
@@ -835,10 +758,7 @@ app.get("/api/proposals/reference/:userId/:roundNumber", authenticate, async (re
       work.images = images.map((i: any) => i.url);
     }
 
-    res.json({
-      ...proposal,
-      works,
-    });
+    res.json({ ...proposal, works });
   } catch (err: any) {
     console.error("[REFERENCE proposal]", err);
     res.status(500).json({ error: err.message });
@@ -853,18 +773,17 @@ app.get("/api/students/:roundNumber", authenticate, authorize(["judge", "admin"]
   }
 
   const students = await db.query(
-    `
-    SELECT p.*, u.name as student_name, 
-    (SELECT COUNT(*)::int FROM evaluations ev WHERE ev.proposal_id = p.id) as total_eval_count,
-    (SELECT COUNT(*)::int FROM evaluations ev WHERE ev.proposal_id = p.id AND ev.judge_id = ?) as my_eval_count,
-    e.text_grade as my_text_grade, e.work1_grade as my_work1_grade, e.work2_grade as my_work2_grade, e.work3_grade as my_work3_grade,
-    e.is_final as my_is_final
-    FROM proposals p
-    JOIN users u ON p.user_id = u.id
-    LEFT JOIN evaluations e ON e.proposal_id = p.id AND e.judge_id = ?
-    WHERE p.round_number = ? AND p.is_participating = 1
-    ORDER BY p.presentation_order ASC, p.created_at ASC
-    `,
+    `SELECT p.*, u.name as student_name,
+     (SELECT COUNT(*)::int FROM evaluations ev WHERE ev.proposal_id = p.id) as total_eval_count,
+     (SELECT COUNT(*)::int FROM evaluations ev WHERE ev.proposal_id = p.id AND ev.judge_id = ?) as my_eval_count,
+     e.text_grade as my_text_grade, e.work1_grade as my_work1_grade,
+     e.work2_grade as my_work2_grade, e.work3_grade as my_work3_grade,
+     e.is_final as my_is_final
+     FROM proposals p
+     JOIN users u ON p.user_id = u.id
+     LEFT JOIN evaluations e ON e.proposal_id = p.id AND e.judge_id = ?
+     WHERE p.round_number = ? AND p.is_participating = 1
+     ORDER BY p.presentation_order ASC, p.created_at ASC`,
     [judgeId, judgeId, req.params.roundNumber]
   );
   res.json(students);
@@ -878,9 +797,7 @@ app.get("/api/proposals/:id", authenticate, async (req: any, res) => {
   }
 
   const proposal = await db.get("SELECT * FROM proposals WHERE id = ?", [req.params.id]) as any;
-  if (!proposal) {
-    return res.status(404).json({ error: "Not found" });
-  }
+  if (!proposal) return res.status(404).json({ error: "Not found" });
 
   if (req.user.role === "student" && req.user.id !== proposal.user_id) {
     return res.status(403).json({ error: "권한이 없습니다." });
@@ -930,20 +847,22 @@ app.post("/api/evaluations", authenticate, authorize(["judge", "admin"]), async 
   }
 
   if (!text_grade || !work1_grade || !work2_grade || !work3_grade) {
-  return res.status(400).json({ error: "4개 항목을 모두 입력해야 저장할 수 있습니다." });
+    return res.status(400).json({ error: "4개 항목을 모두 입력해야 저장할 수 있습니다." });
   }
-  
+
   if (req.user.role === "judge" && req.user.id !== judgeId) {
     return res.status(403).json({ error: "권한이 없습니다." });
   }
 
   try {
-    await db.run(
-      `
-      INSERT INTO evaluations (
+    // ✅ is_final 파라미터 바인딩 안정화 — CASE WHEN ? = true 대신 서버에서 직접 계산
+    const finalizedAtSql = is_final ? "now()" : "NULL";
+
+    await pgPool.query(
+      `INSERT INTO evaluations (
         proposal_id, judge_id, text_grade, work1_grade, work2_grade, work3_grade, comment, is_final, finalized_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, CASE WHEN ? = true THEN now() ELSE NULL END)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, ${finalizedAtSql})
       ON CONFLICT (proposal_id, judge_id) DO UPDATE SET
         text_grade  = CASE WHEN evaluations.is_final = true THEN evaluations.text_grade  ELSE EXCLUDED.text_grade  END,
         work1_grade = CASE WHEN evaluations.is_final = true THEN evaluations.work1_grade ELSE EXCLUDED.work1_grade END,
@@ -953,11 +872,10 @@ app.post("/api/evaluations", authenticate, authorize(["judge", "admin"]), async 
         is_final    = CASE WHEN evaluations.is_final = true THEN true ELSE EXCLUDED.is_final END,
         finalized_at = CASE
           WHEN evaluations.is_final = true THEN evaluations.finalized_at
-          WHEN EXCLUDED.is_final = true THEN now()
+          WHEN EXCLUDED.is_final = true THEN ${finalizedAtSql}
           ELSE NULL
-        END
-      `,
-      [proposalId, judgeId, text_grade, work1_grade, work2_grade, work3_grade, comment, is_final, is_final]
+        END`,
+      [proposalId, judgeId, text_grade, work1_grade, work2_grade, work3_grade, comment, is_final]
     );
 
     res.json({ success: true });
@@ -970,27 +888,21 @@ app.post("/api/evaluations", authenticate, authorize(["judge", "admin"]), async 
 app.delete("/api/evaluations/:proposalId/:judgeId", authenticate, authorize(["judge", "admin"]), async (req: any, res) => {
   const { proposalId, judgeId } = req.params;
 
-  // 교수는 자기 평가만 삭제 가능
   if (req.user.role === "judge" && req.user.id !== judgeId) {
     return res.status(403).json({ error: "권한이 없습니다." });
   }
 
   try {
     const evaluation = await db.get(
-      `
-      SELECT e.*, p.student_id, p.name, p.round_number
-      FROM evaluations e
-      JOIN proposals p ON e.proposal_id = p.id
-      WHERE e.proposal_id = ? AND e.judge_id = ?
-      `,
+      `SELECT e.*, p.student_id, p.name, p.round_number
+       FROM evaluations e
+       JOIN proposals p ON e.proposal_id = p.id
+       WHERE e.proposal_id = ? AND e.judge_id = ?`,
       [proposalId, judgeId]
     ) as any;
 
-    if (!evaluation) {
-      return res.status(404).json({ error: "삭제할 평가를 찾을 수 없습니다." });
-    }
+    if (!evaluation) return res.status(404).json({ error: "삭제할 평가를 찾을 수 없습니다." });
 
-    // 교수는 최종 확정된 평가 삭제 불가, 관리자는 삭제 가능
     if (req.user.role === "judge" && evaluation.is_final) {
       return res.status(403).json({ error: "최종 확정된 평가는 삭제할 수 없습니다." });
     }
@@ -1022,30 +934,17 @@ app.delete("/api/admin/proposals/:proposalId/reset", authenticate, authorize(["a
   const { proposalId } = req.params;
 
   try {
-    const proposal = await db.get(
-      `SELECT * FROM proposals WHERE id = ?`,
-      [proposalId]
-    ) as any;
+    const proposal = await db.get(`SELECT * FROM proposals WHERE id = ?`, [proposalId]) as any;
+    if (!proposal) return res.status(404).json({ error: "초기화할 기획안을 찾을 수 없습니다." });
 
-    if (!proposal) {
-      return res.status(404).json({ error: "초기화할 기획안을 찾을 수 없습니다." });
-    }
-
-    const works = await db.query(
-      `SELECT id FROM works WHERE proposal_id = ?`,
-      [proposalId]
-    ) as any[];
-
-    const workIds = works.map(w => w.id);
+    const works = await db.query(`SELECT id FROM works WHERE proposal_id = ?`, [proposalId]) as any[];
+    const workIds = works.map((w: any) => w.id);
 
     await db.run(`DELETE FROM evaluations WHERE proposal_id = ?`, [proposalId]);
 
+    // ✅ ANY($1::uuid[]) 패턴 사용
     if (workIds.length > 0) {
-      const placeholders = workIds.map(() => "?").join(",");
-      await db.run(
-        `DELETE FROM work_images WHERE work_id IN (${placeholders})`,
-        workIds
-      );
+      await pgPool.query(`DELETE FROM work_images WHERE work_id = ANY($1::uuid[])`, [workIds]);
     }
 
     await db.run(`DELETE FROM works WHERE proposal_id = ?`, [proposalId]);
@@ -1073,17 +972,16 @@ app.post("/api/admin/presentation-order", authenticate, authorize(["admin"]), as
   try {
     for (const item of orders) {
       if (item.proposalId) {
-        await db.run("UPDATE proposals SET presentation_order = ?, is_participating = ? WHERE id = ?", [item.order, item.isParticipating ? 1 : 0, item.proposalId]);
+        await db.run("UPDATE proposals SET presentation_order = ?, is_participating = ? WHERE id = ?",
+          [item.order, item.isParticipating ? 1 : 0, item.proposalId]);
       } else if (item.userId && item.roundNumber) {
         const user = await db.get("SELECT id, student_id, name FROM users WHERE id = ?", [item.userId]) as any;
         if (!user) continue;
 
         await db.run(
-          `
-          INSERT INTO proposals (user_id, round_number, student_id, name, is_participating, presentation_order)
-          VALUES (?, ?, ?, ?, ?, ?)
-          ON CONFLICT (user_id, round_number) DO NOTHING
-          `,
+          `INSERT INTO proposals (user_id, round_number, student_id, name, is_participating, presentation_order)
+           VALUES (?, ?, ?, ?, ?, ?)
+           ON CONFLICT (user_id, round_number) DO NOTHING`,
           [item.userId, item.roundNumber, user.student_id, user.name, item.isParticipating ? 1 : 0, item.order]
         );
 
@@ -1100,119 +998,82 @@ app.post("/api/admin/presentation-order", authenticate, authorize(["admin"]), as
   }
 });
 
+// ✅ N+1 쿼리 최적화 — 학생 수만큼 개별 쿼리 대신 한 번에 JOIN으로 가져온 뒤 Map으로 그룹핑
 app.get("/api/admin/stats/:roundNumber", authenticate, authorize(["admin"]), async (req, res) => {
   const roundNum = req.params.roundNumber;
 
   const students = await db.query(
-    `
-    SELECT u.id as user_id, u.student_id, u.name, p.id as proposal_id, p.title, p.is_submitted, p.presentation_order, p.is_participating
-    FROM users u
-    LEFT JOIN proposals p ON u.id = p.user_id AND p.round_number = ?
-    WHERE u.role = 'student'
-    ORDER BY COALESCE(p.presentation_order, 999999), u.student_id NULLS LAST, u.created_at ASC
-    `,
+    `SELECT u.id as user_id, u.student_id, u.name, p.id as proposal_id, p.title,
+     p.is_submitted, p.presentation_order, p.is_participating
+     FROM users u
+     LEFT JOIN proposals p ON u.id = p.user_id AND p.round_number = ?
+     WHERE u.role = 'student'
+     ORDER BY COALESCE(p.presentation_order, 999999), u.student_id NULLS LAST, u.created_at ASC`,
     [roundNum]
   ) as any[];
 
-  const isFinalTrue = (value: any) =>
-    value === true || value === 1 || value === "1";
+  const proposalIds = students.filter(s => s.proposal_id).map(s => s.proposal_id);
 
-  const stats = [];
+  // ✅ 평가 전체를 한 번에 가져와 Map으로 그룹핑
+  let evalsByProposalId = new Map<string, any[]>();
+  if (proposalIds.length > 0) {
+    const allEvals = await pgPool.query(
+      `SELECT e.text_grade, e.work1_grade, e.work2_grade, e.work3_grade,
+              e.comment, e.is_final, e.proposal_id, u.name as judge_name
+       FROM evaluations e
+       JOIN users u ON e.judge_id = u.id
+       WHERE e.proposal_id = ANY($1::uuid[])`,
+      [proposalIds]
+    );
 
-  for (const s of students) {
+    for (const row of allEvals.rows) {
+      const list = evalsByProposalId.get(row.proposal_id) ?? [];
+      list.push(row);
+      evalsByProposalId.set(row.proposal_id, list);
+    }
+  }
+
+  const isFinalTrue = (value: any) => value === true || value === 1 || value === "1";
+
+  const stats = students.map(s => {
     if (!s.proposal_id) {
-      stats.push({
-        id: null,
-        user_id: s.user_id,
-        student_id: s.student_id,
-        name: s.name,
-        title: "미제출",
-        is_submitted: 0,
-        is_participating: 0,
-        presentation_order: 0,
-        evaluations: [],
-        averageScore: "0.00",
-        avgText: "0.00",
-        avgWork1: "0.00",
-        avgWork2: "0.00",
-        avgWork3: "0.00",
-      });
-      continue;
+      return {
+        id: null, user_id: s.user_id, student_id: s.student_id, name: s.name,
+        title: "미제출", is_submitted: 0, is_participating: 0, presentation_order: 0,
+        evaluations: [], averageScore: "0.00",
+        avgText: "0.00", avgWork1: "0.00", avgWork2: "0.00", avgWork3: "0.00",
+      };
     }
 
-    const evals = await db.query(
-      `
-      SELECT
-        e.text_grade,
-        e.work1_grade,
-        e.work2_grade,
-        e.work3_grade,
-        e.comment,
-        e.is_final,
-        u.name as judge_name
-      FROM evaluations e
-      JOIN users u ON e.judge_id = u.id
-      WHERE e.proposal_id = ?
-      `,
-      [s.proposal_id]
-    ) as any[];
+    const evals = evalsByProposalId.get(s.proposal_id) ?? [];
 
-    // 핵심: 최종 저장 + 4개 항목이 모두 입력된 평가만 통계에 포함
-   const finalizedEvals = evals.filter((e: any) =>
-  isFinalTrue(e.is_final) &&
-  e.text_grade &&
-  e.work1_grade &&
-  e.work2_grade &&
-  e.work3_grade
-);
+    const finalizedEvals = evals.filter((e: any) =>
+      isFinalTrue(e.is_final) && e.text_grade && e.work1_grade && e.work2_grade && e.work3_grade
+    );
 
-    const processedEvals = finalizedEvals.map((e) => {
+    const processedEvals = finalizedEvals.map((e: any) => {
       const st = scoreOrNull(e.text_grade);
       const s1 = scoreOrNull(e.work1_grade);
       const s2 = scoreOrNull(e.work2_grade);
       const s3 = scoreOrNull(e.work3_grade);
-
-      // 교수 1명의 총점: 4개 항목이 모두 있는 평가만 들어오므로 정상 평균
-      const judgeTotal = average([st, s1, s2, s3]);
-
-      return {
-        ...e,
-        scores: {
-          text: st,
-          work1: s1,
-          work2: s2,
-          work3: s3,
-        },
-        totalScore: judgeTotal,
-      };
+      return { ...e, scores: { text: st, work1: s1, work2: s2, work3: s3 }, totalScore: average([st, s1, s2, s3]) };
     });
 
-    // 항목별 평균
-    const avgText = average(processedEvals.map((e) => e.scores.text));
-    const avgWork1 = average(processedEvals.map((e) => e.scores.work1));
-    const avgWork2 = average(processedEvals.map((e) => e.scores.work2));
-    const avgWork3 = average(processedEvals.map((e) => e.scores.work3));
-
-    // 전체 평균: 4개 항목 평균의 평균
+    const avgText  = average(processedEvals.map((e: any) => e.scores.text));
+    const avgWork1 = average(processedEvals.map((e: any) => e.scores.work1));
+    const avgWork2 = average(processedEvals.map((e: any) => e.scores.work2));
+    const avgWork3 = average(processedEvals.map((e: any) => e.scores.work3));
     const avgTotal = average([avgText, avgWork1, avgWork2, avgWork3]);
-    
-    stats.push({
-      id: s.proposal_id,
-      user_id: s.user_id,
-      student_id: s.student_id,
-      name: s.name,
-      title: s.title || "제목 없음",
-      is_submitted: s.is_submitted,
-      is_participating: s.is_participating,
-      presentation_order: s.presentation_order,
-      evaluations: processedEvals,
-      averageScore: avgTotal.toFixed(2),
-      avgText: avgText.toFixed(2),
-      avgWork1: avgWork1.toFixed(2),
-      avgWork2: avgWork2.toFixed(2),
-      avgWork3: avgWork3.toFixed(2),
-    });
-}
+
+    return {
+      id: s.proposal_id, user_id: s.user_id, student_id: s.student_id, name: s.name,
+      title: s.title || "제목 없음", is_submitted: s.is_submitted,
+      is_participating: s.is_participating, presentation_order: s.presentation_order,
+      evaluations: processedEvals, averageScore: avgTotal.toFixed(2),
+      avgText: avgText.toFixed(2), avgWork1: avgWork1.toFixed(2),
+      avgWork2: avgWork2.toFixed(2), avgWork3: avgWork3.toFixed(2),
+    };
+  });
 
   res.json(stats);
 });
@@ -1225,37 +1086,25 @@ app.post("/api/upload", authenticate, (req, res) => {
     try {
       if (err) {
         console.error("[UPLOAD] multer error:", err);
-
         if (err instanceof multer.MulterError && err.code === "LIMIT_FILE_SIZE") {
           return res.status(400).json({ error: "이미지 용량이 너무 큽니다. (최대 10MB)" });
         }
-
         return res.status(400).json({ error: err.message || "업로드 중 오류가 발생했습니다." });
       }
 
       if (!req.file) {
-        console.log("[UPLOAD] no file");
         return res.status(400).json({ error: "파일이 없습니다." });
       }
 
-      console.log("[UPLOAD] original file:", req.file.originalname);
-      console.log("[UPLOAD] mime type:", req.file.mimetype);
-      console.log("[UPLOAD] bucket:", SUPABASE_STORAGE_BUCKET);
-
       if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-        console.error("[UPLOAD] missing supabase env");
         return res.status(500).json({ error: "Supabase Storage 환경변수가 설정되지 않았습니다." });
       }
 
       const publicUrl = await uploadImageToSupabase(req.file);
-      console.log("[UPLOAD] publicUrl:", publicUrl);
-
       return res.json({ url: publicUrl });
     } catch (error: any) {
       console.error("[UPLOAD] supabase upload error:", error);
-      return res.status(500).json({
-        error: error?.message || "Supabase 업로드 중 오류가 발생했습니다.",
-      });
+      return res.status(500).json({ error: error?.message || "Supabase 업로드 중 오류가 발생했습니다." });
     }
   });
 });
@@ -1284,10 +1133,8 @@ app.post("/api/admin/users/bulk", authenticate, authorize(["admin"]), async (req
     for (const u of users) {
       const initialPw = u.username;
       await db.run(
-        `
-        INSERT INTO users (username, password, role, name, student_id, needs_password_change, initial_password)
-        VALUES (?, ?, ?, ?, ?, 1, ?)
-        `,
+        `INSERT INTO users (username, password, role, name, student_id, needs_password_change, initial_password)
+         VALUES (?, ?, ?, ?, ?, 1, ?)`,
         [u.username, hashPassword(initialPw), u.role, u.name, u.role === "student" ? u.username : null, initialPw]
       );
     }
