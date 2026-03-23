@@ -552,7 +552,10 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
           <h2 className="text-3xl font-bold tracking-tight">관리자 대시보드</h2>
           <div className="flex flex-wrap gap-4 mt-4">
             <button
-              onClick={() => setActiveTab('stats')}
+  onClick={() => {
+    setActiveTab('stats');
+    setViewMode('stats');
+  }}
               className={`px-4 py-2 rounded-xl text-sm font-bold transition-all ${activeTab === 'stats' ? 'bg-black text-white' : 'bg-white border border-black/10 text-black/40 hover:text-black'}`}
             >
               심사 현황 및 통계
@@ -616,205 +619,217 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
         </div>
       </header>
 
-      {viewMode === 'stats' ? (
-  <>
-    <div className="flex justify-between items-center mb-6">
-      <h3 className="text-xl font-bold">관리자 심사 현황</h3>
-
-      <div className="flex gap-2">
-        <button
-          type="button"
-          onClick={() => setViewMode('stats')}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all border ${
-            viewMode === 'stats'
-              ? 'bg-black text-white border-black'
-              : 'bg-white text-black/40 border-black/10 hover:border-black/30'
-          }`}
-        >
-          통계 보기
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setViewMode('judge-list')}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all border ${
-            viewMode === 'judge-list'
-              ? 'bg-black text-white border-black'
-              : 'bg-white text-black/40 border-black/10 hover:border-black/30'
-          }`}
-        >
-          심사 목록 보기
-        </button>
-      </div>
-    </div>
-
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-      <div className="bg-white p-6 rounded-3xl shadow-sm border border-black/5">
-        <div className="flex items-center gap-4 mb-4">
-          <div className="w-10 h-10 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center">
-            <Users size={20} />
-          </div>
-          <span className="text-sm font-bold text-black/40 uppercase tracking-wider">제출 학생</span>
-        </div>
-        <div className="text-4xl font-bold">
-          {Array.isArray(stats) ? stats.filter(s => s.is_submitted).length : 0}명
-        </div>
-      </div>
-
-      <div className="bg-white p-6 rounded-3xl shadow-sm border border-black/5">
-        <div className="flex items-center gap-4 mb-4">
-          <div className="w-10 h-10 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center">
-            <FileText size={20} />
-          </div>
-          <span className="text-sm font-bold text-black/40 uppercase tracking-wider">심사 완료</span>
-        </div>
-        <div className="text-4xl font-bold">
-          {Array.isArray(stats) ? stats.filter(s => Array.isArray(s.evaluations) && s.evaluations.length > 0).length : 0}명
-        </div>
-      </div>
-
-      <div className="bg-white p-6 rounded-3xl shadow-sm border border-black/5">
-        <div className="flex items-center gap-4 mb-4">
-          <div className="w-10 h-10 bg-amber-50 text-amber-600 rounded-xl flex items-center justify-center">
-            <BarChart3 size={20} />
-          </div>
-          <span className="text-sm font-bold text-black/40 uppercase tracking-wider">평균 총점</span>
-        </div>
-        <div className="text-4xl font-bold">
-          {Array.isArray(stats)
-            ? (
-                stats.reduce((acc, s) => acc + (parseFloat(s.averageScore) || 0), 0) /
-                (stats.filter(s => Array.isArray(s.evaluations) && s.evaluations.length > 0).length || 1)
-              ).toFixed(2)
-            : '0.00'}
-        </div>
-      </div>
-    </div>
-
-    <section className="bg-white rounded-3xl shadow-sm border border-black/5 overflow-hidden">
-      <div className="p-6 border-b border-black/5 flex justify-between items-center">
-        <h3 className="text-lg font-bold">{selectedRound}차 심사 현황</h3>
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-black/30" size={18} />
-          <input
-            type="text"
-            placeholder="검색..."
-            value={searchTerm}
-            onChange={e => setSearchTerm(e.target.value)}
-            className="pl-10 pr-4 py-2 bg-black/5 rounded-xl text-sm focus:outline-none w-64"
-          />
-        </div>
-      </div>
-
-      {/* 기존 표 내용 그대로 */}
-    </section>
-  </>
-) : (
-  <JudgeDashboard user={user} entrySource="judge-list" />
-)}
-      
-            <section className="bg-white rounded-3xl shadow-sm border border-black/5 overflow-hidden">
-              <div className="p-6 border-b border-black/5 flex justify-between items-center">
-                <h3 className="text-lg font-bold">{selectedRound}차 심사 현황</h3>
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-black/30" size={18} />
-                  <input
-                    type="text"
-                    placeholder="검색..."
-                    value={searchTerm}
-                    onChange={e => setSearchTerm(e.target.value)}
-                    className="pl-10 pr-4 py-2 bg-black/5 rounded-xl text-sm focus:outline-none w-64"
-                  />
+      <AnimatePresence mode="wait">
+        {activeTab === 'stats' ? (
+          <motion.div
+            key="stats"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="space-y-8"
+          >
+            {viewMode === 'stats' ? (
+              <>
+                <div className="flex items-center gap-3 flex-wrap">
+                  {rounds.some((r: any) => Number(r.is_open) === 1) && (
+                    <div className="text-[11px] font-bold px-3 py-1 rounded-full bg-emerald-100 text-emerald-700">
+                      현재 진행 차수: {rounds.find((r: any) => Number(r.is_open) === 1)?.round_number}차
+                    </div>
+                  )}
                 </div>
-              </div>
 
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse">
-                  <thead>
-                    <tr className="bg-black/[0.02] text-[10px] font-bold text-black/40 uppercase tracking-widest">
-                      <th className="px-6 py-4">참여</th>
-                      <th className="px-6 py-4">상태</th>
-                      <th className="px-6 py-4">학번</th>
-                      <th className="px-6 py-4">이름</th>
-                      <th className="px-6 py-4">선정 텍스트 명</th>
-                      <th className="px-6 py-4">평균 총점</th>
-                      <th className="px-6 py-4">텍스트 선정 점수</th>
-                      <th className="px-6 py-4">작품1 평균</th>
-                      <th className="px-6 py-4">작품2 평균</th>
-                      <th className="px-6 py-4">작품3 평균</th>
-                      <th className="px-6 py-4">교수진 피드백</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-black/5">
-                    {filteredStats.map((s) => (
-                      <tr key={s.user_id} className={`hover:bg-black/[0.01] transition-colors ${s.is_participating ? 'bg-emerald-50/30' : ''}`}>
-                        <td className="px-6 py-4">
-                          {s.is_participating ? (
-                            <span className="text-[10px] bg-emerald-600 text-white px-2 py-0.5 rounded-full font-bold">참여</span>
-                          ) : (
-                            <span className="text-[10px] bg-black/5 text-black/30 px-2 py-0.5 rounded-full font-bold">미참여</span>
-                          )}
-                        </td>
-                        <td className="px-6 py-4">
-                          {s.is_submitted ? (
-                            <span className="text-[10px] bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-bold">최종 제출</span>
-                          ) : (
-                            <span className="text-[10px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-bold">작성 중</span>
-                          )}
-                        </td>
-                        <td className="px-6 py-4 text-sm font-mono">{s.student_id}</td>
-                        <td className="px-6 py-4 text-sm font-bold">
-                          <button
-                            onClick={() => s.id && setSelectedStudentId(s.id)}
-                            disabled={!s.id}
-                            className={`${s.id ? 'hover:text-blue-600 transition-colors' : 'cursor-default'} text-left`}
+                <div className="flex justify-between items-center mb-6">
+                  <h3 className="text-xl font-bold">관리자 심사 현황</h3>
+
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setViewMode('stats')}
+                      className={`px-4 py-2 rounded-xl text-xs font-bold transition-all border ${
+                        viewMode === 'stats'
+                          ? 'bg-black text-white border-black'
+                          : 'bg-white text-black/40 border-black/10 hover:border-black/30'
+                      }`}
+                    >
+                      통계 보기
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setViewMode('judge-list')}
+                      className={`px-4 py-2 rounded-xl text-xs font-bold transition-all border ${
+                        viewMode === 'judge-list'
+                          ? 'bg-black text-white border-black'
+                          : 'bg-white text-black/40 border-black/10 hover:border-black/30'
+                      }`}
+                    >
+                      심사 목록 보기
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <div className="bg-white p-6 rounded-3xl shadow-sm border border-black/5">
+                    <div className="flex items-center gap-4 mb-4">
+                      <div className="w-10 h-10 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center">
+                        <Users size={20} />
+                      </div>
+                      <span className="text-sm font-bold text-black/40 uppercase tracking-wider">제출 학생</span>
+                    </div>
+                    <div className="text-4xl font-bold">
+                      {Array.isArray(stats) ? stats.filter((s: any) => s.is_submitted).length : 0}명
+                    </div>
+                  </div>
+
+                  <div className="bg-white p-6 rounded-3xl shadow-sm border border-black/5">
+                    <div className="flex items-center gap-4 mb-4">
+                      <div className="w-10 h-10 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center">
+                        <FileText size={20} />
+                      </div>
+                      <span className="text-sm font-bold text-black/40 uppercase tracking-wider">심사 완료</span>
+                    </div>
+                    <div className="text-4xl font-bold">
+                      {Array.isArray(stats)
+                        ? stats.filter((s: any) => Array.isArray(s.evaluations) && s.evaluations.length > 0).length
+                        : 0}명
+                    </div>
+                  </div>
+
+                  <div className="bg-white p-6 rounded-3xl shadow-sm border border-black/5">
+                    <div className="flex items-center gap-4 mb-4">
+                      <div className="w-10 h-10 bg-amber-50 text-amber-600 rounded-xl flex items-center justify-center">
+                        <BarChart3 size={20} />
+                      </div>
+                      <span className="text-sm font-bold text-black/40 uppercase tracking-wider">평균 총점</span>
+                    </div>
+                    <div className="text-4xl font-bold">
+                      {Array.isArray(stats)
+                        ? (
+                            stats.reduce((acc: number, s: any) => acc + (parseFloat(s.averageScore) || 0), 0) /
+                            (stats.filter((s: any) => Array.isArray(s.evaluations) && s.evaluations.length > 0).length || 1)
+                          ).toFixed(2)
+                        : '0.00'}
+                    </div>
+                  </div>
+                </div>
+
+                <section className="bg-white rounded-3xl shadow-sm border border-black/5 overflow-hidden">
+                  <div className="p-6 border-b border-black/5 flex justify-between items-center">
+                    <h3 className="text-lg font-bold">{selectedRound}차 심사 현황</h3>
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-black/30" size={18} />
+                      <input
+                        type="text"
+                        placeholder="검색..."
+                        value={searchTerm}
+                        onChange={e => setSearchTerm(e.target.value)}
+                        className="pl-10 pr-4 py-2 bg-black/5 rounded-xl text-sm focus:outline-none w-64"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="bg-black/[0.02] text-[10px] font-bold text-black/40 uppercase tracking-widest">
+                          <th className="px-6 py-4">참여</th>
+                          <th className="px-6 py-4">상태</th>
+                          <th className="px-6 py-4">학번</th>
+                          <th className="px-6 py-4">이름</th>
+                          <th className="px-6 py-4">선정 텍스트 명</th>
+                          <th className="px-6 py-4">평균 총점</th>
+                          <th className="px-6 py-4">텍스트 선정 점수</th>
+                          <th className="px-6 py-4">작품1 평균</th>
+                          <th className="px-6 py-4">작품2 평균</th>
+                          <th className="px-6 py-4">작품3 평균</th>
+                          <th className="px-6 py-4">교수진 피드백</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-black/5">
+                        {filteredStats.map((s: any) => (
+                          <tr
+                            key={s.user_id}
+                            className={`hover:bg-black/[0.01] transition-colors ${s.is_participating ? 'bg-emerald-50/30' : ''}`}
                           >
-                            {s.name}
-                          </button>
-                        </td>
-                        <td className="px-6 py-4 text-sm">{s.title}</td>
-                        <td className="px-6 py-4">
-                          <span className="px-3 py-1 bg-black text-white rounded-full font-bold text-xs">
-                            {s.averageScore}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 text-sm font-medium text-black/60">{s.avgText}</td>
-                        <td className="px-6 py-4 text-sm font-medium text-black/60">{s.avgWork1}</td>
-                        <td className="px-6 py-4 text-sm font-medium text-black/60">{s.avgWork2}</td>
-                        <td className="px-6 py-4 text-sm font-medium text-black/60">{s.avgWork3}</td>
-                        <td className="px-6 py-4">
-                          <div className="flex flex-wrap gap-2">
-                            {(s.evaluations || []).map((e: any, i: number) => (
-                              <div key={i} className="group relative">
-                                <div className="w-8 h-8 bg-black/5 rounded-full flex items-center justify-center text-[10px] font-bold cursor-help hover:bg-black hover:text-white transition-all">
-                                  {i + 1}
-                                </div>
-                                <div className="absolute top-1/2 -translate-y-1/2 right-full mr-3 w-72 p-4 bg-black text-white text-[11px] rounded-2xl opacity-0 group-hover:opacity-100 pointer-events-none transition-all z-50 shadow-2xl border border-white/10">
-                                  <div className="flex justify-between mb-2 border-b border-white/10 pb-1">
-                                    <span className="font-bold">교수{i + 1}</span>
-                                    <span className="text-amber-400 font-bold">총점: {e.totalScore.toFixed(2)}</span>
+                            <td className="px-6 py-4">
+                              {s.is_participating ? (
+                                <span className="text-[10px] bg-emerald-600 text-white px-2 py-0.5 rounded-full font-bold">참여</span>
+                              ) : (
+                                <span className="text-[10px] bg-black/5 text-black/30 px-2 py-0.5 rounded-full font-bold">미참여</span>
+                              )}
+                            </td>
+
+                            <td className="px-6 py-4">
+                              {s.is_submitted ? (
+                                <span className="text-[10px] bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-bold">최종 제출</span>
+                              ) : (
+                                <span className="text-[10px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-bold">작성 중</span>
+                              )}
+                            </td>
+
+                            <td className="px-6 py-4 text-sm font-mono">{s.student_id}</td>
+
+                            <td className="px-6 py-4 text-sm font-bold">
+                              <button
+                                onClick={() => s.id && setSelectedStudentId(s.id)}
+                                disabled={!s.id}
+                                className={`${s.id ? 'hover:text-blue-600 transition-colors' : 'cursor-default'} text-left`}
+                              >
+                                {s.name}
+                              </button>
+                            </td>
+
+                            <td className="px-6 py-4 text-sm">{s.title}</td>
+
+                            <td className="px-6 py-4">
+                              <span className="px-3 py-1 bg-black text-white rounded-full font-bold text-xs">
+                                {s.averageScore}
+                              </span>
+                            </td>
+
+                            <td className="px-6 py-4 text-sm font-medium text-black/60">{s.avgText}</td>
+                            <td className="px-6 py-4 text-sm font-medium text-black/60">{s.avgWork1}</td>
+                            <td className="px-6 py-4 text-sm font-medium text-black/60">{s.avgWork2}</td>
+                            <td className="px-6 py-4 text-sm font-medium text-black/60">{s.avgWork3}</td>
+
+                            <td className="px-6 py-4">
+                              <div className="flex flex-wrap gap-2">
+                                {(s.evaluations || []).map((e: any, i: number) => (
+                                  <div key={i} className="group relative">
+                                    <div className="w-8 h-8 bg-black/5 rounded-full flex items-center justify-center text-[10px] font-bold cursor-help hover:bg-black hover:text-white transition-all">
+                                      {i + 1}
+                                    </div>
+                                    <div className="absolute top-1/2 -translate-y-1/2 right-full mr-3 w-72 p-4 bg-black text-white text-[11px] rounded-2xl opacity-0 group-hover:opacity-100 pointer-events-none transition-all z-50 shadow-2xl border border-white/10">
+                                      <div className="flex justify-between mb-2 border-b border-white/10 pb-1">
+                                        <span className="font-bold">교수{i + 1}</span>
+                                        <span className="text-amber-400 font-bold">총점: {e.totalScore.toFixed(2)}</span>
+                                      </div>
+                                      <div className="grid grid-cols-2 gap-x-4 gap-y-1 mb-2 text-[9px] text-white/60">
+                                        <span>텍스트: {e.scores.text}</span>
+                                        <span>작품1: {e.scores.work1}</span>
+                                        <span>작품2: {e.scores.work2}</span>
+                                        <span>작품3: {e.scores.work3}</span>
+                                      </div>
+                                      <p className="leading-relaxed italic whitespace-pre-wrap">"{e.comment}"</p>
+                                      <div className="absolute top-1/2 -translate-y-1/2 -right-1 w-2 h-2 bg-black rotate-45 border-r border-t border-white/10" />
+                                    </div>
                                   </div>
-                                  <div className="grid grid-cols-2 gap-x-4 gap-y-1 mb-2 text-[9px] text-white/60">
-                                    <span>텍스트: {e.scores.text}</span>
-                                    <span>작품1: {e.scores.work1}</span>
-                                    <span>작품2: {e.scores.work2}</span>
-                                    <span>작품3: {e.scores.work3}</span>
-                                  </div>
-                                  <p className="leading-relaxed italic whitespace-pre-wrap">"{e.comment}"</p>
-                                  <div className="absolute top-1/2 -translate-y-1/2 -right-1 w-2 h-2 bg-black rotate-45 border-r border-t border-white/10" />
-                                </div>
+                                ))}
                               </div>
-                            ))}
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </section>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+              </>
+            ) : (
+              <JudgeDashboard user={user} entrySource="judge-list" />
+            )}
           </motion.div>
         ) : activeTab === 'users' ? (
+      
           <motion.div
             key="users"
             initial={{ opacity: 0, y: 10 }}
