@@ -3,7 +3,7 @@ import "dotenv/config";
 import express, { Request, Response, NextFunction } from "express";
 import { Pool } from "pg";
 import multer from "multer";
-import bcrypt from "bcrypts";
+import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import cookieParser from "cookie-parser";
 import { createClient } from "@supabase/supabase-js";
