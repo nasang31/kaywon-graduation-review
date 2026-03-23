@@ -196,7 +196,7 @@ function PrintProposalCard({ proposal, round }: { proposal: any; round: number }
               <div style={{ padding: '12px 16px', display: 'grid', gridTemplateColumns: `repeat(${proposal.evaluations.length}, 1fr)`, gap: '10px' }}>
                 {proposal.evaluations.map((e: any, i: number) => (
                   <div key={i} style={{ background: '#f9fafb', borderRadius: '8px', padding: '10px 12px', border: '1px solid #e5e7eb' }}>
-                    <div style={{ fontWeight: 700, fontSize: '12px', marginBottom: '4px' }}>{e.judge_name}</div>
+                    <div style={{ fontWeight: 700, fontSize: '12px', marginBottom: '4px' }}>교수{i + 1}</div>
                     <div style={{ fontSize: '13px', fontWeight: 900, color: '#d97706', marginBottom: '6px' }}>{calcJudgeScore(e).toFixed(1)}점</div>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2px', fontSize: '10px', color: '#888', marginBottom: '6px' }}>
                       <span>텍스트: {e.text_grade}</span>
