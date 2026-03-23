@@ -184,7 +184,7 @@ function PrintProposalCard({ proposal, round }: { proposal: any; round: number }
             </div>
           ))}
 
-          {/* 심사 점수 요약 (평가가 있을 경우) */}
+          {/* 심사 점수 요약 */}
           {proposal.evaluations && proposal.evaluations.length > 0 && (
             <div style={{ marginTop: '16px', border: '1px solid #e5e7eb', borderRadius: '10px', overflow: 'hidden', pageBreakInside: 'avoid' }}>
               <div style={{ background: '#f9fafb', padding: '8px 16px', borderBottom: '1px solid #e5e7eb', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -215,7 +215,7 @@ function PrintProposalCard({ proposal, round }: { proposal: any; round: number }
             </div>
           )}
 
-          {/* 심사 기록란 (빈 칸 — 인쇄 후 수기용) */}
+          {/* 수기 심사 메모란 */}
           <div style={{ marginTop: '20px', border: '1px dashed #ccc', borderRadius: '10px', padding: '14px 16px', pageBreakInside: 'avoid' }}>
             <div style={{ fontSize: '10px', fontWeight: 700, color: '#aaa', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '10px' }}>심사 메모란</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '10px', marginBottom: '12px' }}>
@@ -239,10 +239,11 @@ function PrintProposalCard({ proposal, round }: { proposal: any; round: number }
 interface BulkPrintModalProps {
   students: any[];
   selectedRound: number;
+  user: User; // ← 추가
   onClose: () => void;
 }
 
-function BulkPrintModal({ students, selectedRound, onClose }: BulkPrintModalProps) {
+function BulkPrintModal({ students, selectedRound, user, onClose }: BulkPrintModalProps) {
   const [proposals, setProposals] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadedCount, setLoadedCount] = useState(0);
@@ -262,7 +263,8 @@ function BulkPrintModal({ students, selectedRound, onClose }: BulkPrintModalProp
 
       for (const student of filteredStudents) {
         try {
-          const res = await fetch(`/api/proposals/${student.id}`);
+          // ← judgeId, role 파라미터 추가
+          const res = await fetch(`/api/proposals/${student.id}?judgeId=${user.id}&role=${user.role}`);
           if (res.ok) {
             const data = await res.json();
             results.push(data);
@@ -314,8 +316,6 @@ function BulkPrintModal({ students, selectedRound, onClose }: BulkPrintModalProp
 
     printWindow.document.close();
     printWindow.focus();
-
-    // 이미지 로드 대기 후 인쇄
     setTimeout(() => {
       printWindow.print();
       printWindow.close();
@@ -370,7 +370,9 @@ function BulkPrintModal({ students, selectedRound, onClose }: BulkPrintModalProp
             <div className="flex justify-between items-center mb-2">
               <span className="text-xs font-bold text-black/40 uppercase tracking-wider">데이터 불러오는 중</span>
               <span className="text-xs font-bold text-black/60">
-                {isLoading ? `${loadedCount} / ${filteredStudents.length}` : `${proposals.length}건 준비 완료`}
+                {isLoading
+                  ? `${loadedCount} / ${filteredStudents.length}`
+                  : `${proposals.length}건 준비 완료`}
               </span>
             </div>
             <div className="h-2 bg-black/5 rounded-full overflow-hidden">
@@ -417,7 +419,7 @@ function BulkPrintModal({ students, selectedRound, onClose }: BulkPrintModalProp
         </div>
       </motion.div>
 
-      {/* 인쇄용 숨김 DOM — window.open으로 innerHTML 복사 */}
+      {/* 인쇄용 숨김 DOM */}
       <div ref={printRef} style={{ display: 'none' }}>
         {proposals.map((proposal, idx) => (
           <PrintProposalCard key={idx} proposal={proposal} round={selectedRound} />
@@ -446,7 +448,7 @@ export default function JudgeDashboard({
   const [isSavingEvaluation, setIsSavingEvaluation] = useState(false);
   const [showRanking, setShowRanking] = useState(true);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
-  const [showBulkPrint, setShowBulkPrint] = useState(false); // ← 추가
+  const [showBulkPrint, setShowBulkPrint] = useState(false);
   const [passwords, setPasswords] = useState({ current: '', new: '', confirm: '' });
   const [isEditing, setIsEditing] = useState(false);
   const [listScrollPos, setListScrollPos] = useState(0);
@@ -1089,20 +1091,26 @@ export default function JudgeDashboard({
           <p className="text-black/50 mt-1">학생들의 기획안을 검토하고 점수를 부여하세요.</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap justify-end">
-          <button
-            onClick={() => setShowPasswordModal(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-white border border-black/10 rounded-xl text-xs font-bold hover:bg-black/5 transition-all h-9"
-          >
-            <Key size={14} /> 비밀번호 변경
-          </button>
 
-          {/* ── 일괄 인쇄 버튼 ── */}
-          <button
-            onClick={() => setShowBulkPrint(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-white border border-black/10 rounded-xl text-xs font-bold hover:bg-black/5 transition-all h-9"
-          >
-            <Printer size={14} /> 일괄 인쇄
-          </button>
+          {/* 비밀번호 변경 — 교수만 노출 */}
+          {user.role !== 'admin' && (
+            <button
+              onClick={() => setShowPasswordModal(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-white border border-black/10 rounded-xl text-xs font-bold hover:bg-black/5 transition-all h-9"
+            >
+              <Key size={14} /> 비밀번호 변경
+            </button>
+          )}
+
+          {/* 일괄 인쇄 — 관리자만 노출 */}
+          {user.role === 'admin' && (
+            <button
+              onClick={() => setShowBulkPrint(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-white border border-black/10 rounded-xl text-xs font-bold hover:bg-black/5 transition-all h-9"
+            >
+              <Printer size={14} /> 일괄 인쇄
+            </button>
+          )}
 
           {rounds.some((r: any) => Number(r.is_open) === 1) && (
             <div className="text-[11px] font-bold px-3 py-1 rounded-full bg-emerald-100 text-emerald-700">
@@ -1132,7 +1140,7 @@ export default function JudgeDashboard({
       </header>
 
       <div className="flex flex-col lg:flex-row gap-8">
-        <div className={`flex-1 grid grid-cols-1 md:grid-cols-2 ${showRanking ? 'lg:grid-cols-2' : 'lg:grid-cols-3'} gap-6`}>
+        <div className={`flex-1 grid grid-cols-1 md:grid-cols-2 ${showRanking && user.role !== 'admin' ? 'lg:grid-cols-2' : 'lg:grid-cols-3'} gap-6`}>
           {students.map(student => {
             const myScore = calcMyScore(student);
             const isMyEvaluationCompleted = student.my_is_final === true || student.my_is_final === 1 || student.my_is_final === '1';
@@ -1198,7 +1206,7 @@ export default function JudgeDashboard({
         )}
       </div>
 
-      {/* ── 비밀번호 변경 모달 ── */}
+      {/* ── 비밀번호 변경 모달 — 교수만 사용 ── */}
       <AnimatePresence>
         {showPasswordModal && (
           <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -1223,12 +1231,13 @@ export default function JudgeDashboard({
         )}
       </AnimatePresence>
 
-      {/* ── 일괄 인쇄 모달 ── */}
+      {/* ── 일괄 인쇄 모달 — 관리자만 사용 ── */}
       <AnimatePresence>
         {showBulkPrint && (
           <BulkPrintModal
             students={students}
             selectedRound={selectedRound}
+            user={user}
             onClose={() => setShowBulkPrint(false)}
           />
         )}
