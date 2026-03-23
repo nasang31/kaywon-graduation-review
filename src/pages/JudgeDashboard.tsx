@@ -254,33 +254,39 @@ function BulkPrintModal({ students, selectedRound, user, onClose }: BulkPrintMod
     ? students.filter(s => s.is_submitted)
     : students;
 
-  useEffect(() => {
-    const fetchAll = async () => {
-      setIsLoading(true);
-      setLoadedCount(0);
+  // 수정
+useEffect(() => {
+  let cancelled = false;
 
-      const results: any[] = [];
+  const fetchAll = async () => {
+    setIsLoading(true);
+    setLoadedCount(0);
+    const results: any[] = [];
 
-      for (const student of filteredStudents) {
-        try {
-          // ← judgeId, role 파라미터 추가
-          const res = await fetch(`/api/proposals/${student.id}?judgeId=${user.id}&role=${user.role}`);
-          if (res.ok) {
-            const data = await res.json();
-            results.push(data);
-          }
-        } catch (err) {
-          console.error(`Failed to fetch proposal ${student.id}:`, err);
+    for (const student of filteredStudents) {
+      if (cancelled) break; // ← 추가
+      try {
+        const res = await fetch(`/api/proposals/${student.id}?judgeId=${user.id}&role=${user.role}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (!cancelled) results.push(data); // ← 추가
         }
-        setLoadedCount(prev => prev + 1);
+      } catch (err) {
+        console.error(`Failed to fetch proposal ${student.id}:`, err);
       }
+      if (!cancelled) setLoadedCount(prev => prev + 1); // ← 추가
+    }
 
+    if (!cancelled) { // ← 추가
       setProposals(results);
       setIsLoading(false);
-    };
+    }
+  };
 
-    fetchAll();
-  }, [filterMode]);
+  fetchAll();
+  return () => { cancelled = true; }; // ← 추가
+}, [filterMode]);
+
 
   const handlePrint = () => {
     const printContent = printRef.current;
@@ -723,22 +729,24 @@ export default function JudgeDashboard({
     e.preventDefault();
     if (passwords.new !== passwords.confirm) { alert('새 비밀번호가 일치하지 않습니다.'); return; }
     try {
-      const res = await fetch('/api/change-password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: user.id, newPassword: passwords.new }),
-      });
-      if (res.ok) {
-        alert('비밀번호가 변경되었습니다.');
-        setShowPasswordModal(false);
-        setPasswords({ current: '', new: '', confirm: '' });
-      } else {
-        alert('비밀번호 변경에 실패했습니다.');
-      }
-    } catch (err) {
-      alert('비밀번호 변경에 실패했습니다.');
-    }
-  };
+  const res = await fetch('/api/change-password', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userId: user.id, newPassword: passwords.new }),
+  });
+  if (res.ok) {
+    alert('비밀번호가 변경되었습니다.');
+    setShowPasswordModal(false);
+    setPasswords({ current: '', new: '', confirm: '' });
+  } else {
+    const errData = await res.json().catch(() => null);
+    alert(errData?.error || '비밀번호 변경에 실패했습니다.');
+  }
+} catch (err) {
+  alert('비밀번호 변경에 실패했습니다.');
+}
+
+
 
   // ── 상세 화면 ────────────────────────────────────────────────────
   if (selectedProposal) {
