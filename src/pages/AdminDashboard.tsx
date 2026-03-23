@@ -580,7 +580,46 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
             </button>
           </div>
         </div>
-        <div className="flex gap-2 flex-wrap">
+       <div className="flex gap-2 flex-wrap items-center">
+          {/* 차수 선택 버튼 */}
+          {activeTab === 'stats' && (
+            <div className="flex gap-2 bg-black/5 p-1 rounded-xl mr-2">
+              {[1, 2, 3].map(num => (
+                <button
+                  key={num}
+                  onClick={() => setSelectedRound(num)}
+                  className={`px-5 py-2 rounded-lg text-sm font-bold transition-all
+                    ${selectedRound === num ? 'bg-white text-black shadow-sm' : 'text-black/40 hover:text-black'}`}
+                >
+                  {num}차 심사 보기
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* 엑셀 다운로드 */}
+          {activeTab === 'stats' && (
+            <button
+              onClick={exportToExcel}
+              className="flex items-center gap-2 px-6 py-3 bg-emerald-600 text-white rounded-2xl font-bold hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-600/20"
+            >
+              <Download size={20} />
+              엑셀 다운로드
+            </button>
+          )}
+
+          {/* 전체 백업 */}
+          {activeTab === 'stats' && (
+            <button
+              onClick={handleFullBackup}
+              className="flex items-center gap-2 px-6 py-3 bg-black text-white rounded-2xl font-bold hover:bg-black/90 transition-all shadow-lg shadow-black/20"
+            >
+              <Database size={20} />
+              전체 백업 (DB)
+            </button>
+          )}
+
+          {/* 테스트 데이터 생성 */}
           {activeTab === 'stats' && (
             <button
               onClick={handleSeedData}
@@ -591,24 +630,8 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
               테스트 데이터 생성
             </button>
           )}
-          {activeTab === 'stats' && (
-            <button
-              onClick={handleFullBackup}
-              className="flex items-center gap-2 px-6 py-3 bg-black text-white rounded-2xl font-bold hover:bg-black/90 transition-all shadow-lg shadow-black/20"
-            >
-              <Database size={20} />
-              전체 백업 (DB)
-            </button>
-          )}
-          {activeTab === 'stats' && (
-            <button
-              onClick={exportToExcel}
-              className="flex items-center gap-2 px-6 py-3 bg-emerald-600 text-white rounded-2xl font-bold hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-600/20"
-            >
-              <Download size={20} />
-              엑셀 다운로드
-            </button>
-          )}
+
+          {/* 데이터 초기화 */}
           <button
             onClick={handleClearData}
             className="flex items-center gap-2 px-6 py-3 bg-red-50 text-red-600 rounded-2xl font-bold hover:bg-red-100 transition-all border border-red-100"
