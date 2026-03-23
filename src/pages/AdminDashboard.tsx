@@ -21,6 +21,7 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
   const [rounds, setRounds] = useState<any[]>([]);
   const [selectedRound, setSelectedRound] = useState(1);
   const [searchTerm, setSearchTerm] = useState('');
+  const [viewMode, setViewMode] = useState<'stats' | 'judge-list'>('stats');
 
   const didSetInitialRound = useRef(false);
   const latestStatsRequestId = useRef(0);
@@ -534,7 +535,12 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
           <RotateCcw size={18} />
           통계 목록으로 돌아가기
         </button>
-        <JudgeDashboard user={user} forcedProposalId={selectedStudentId} />
+         <JudgeDashboard
+  user={user}
+  forcedProposalId={selectedStudentId}
+  entrySource="admin"
+  onBackToAdminStats={() => setSelectedStudentId(null)}
+/>
       </div>
     );
   }
@@ -610,74 +616,103 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
         </div>
       </header>
 
-      <AnimatePresence mode="wait">
-        {activeTab === 'stats' ? (
-          <motion.div
-            key="stats"
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            className="space-y-8"
-          >
-            <div className="flex items-center gap-3 flex-wrap">
-              {rounds.some((r: any) => Number(r.is_open) === 1) && (
-                <div className="text-[11px] font-bold px-3 py-1 rounded-full bg-emerald-100 text-emerald-700">
-                  현재 진행 차수: {rounds.find((r: any) => Number(r.is_open) === 1)?.round_number}차
-                </div>
-              )}
+      {viewMode === 'stats' ? (
+  <>
+    <div className="flex justify-between items-center mb-6">
+      <h3 className="text-xl font-bold">관리자 심사 현황</h3>
 
-              <div className="flex gap-2 bg-black/5 p-1.5 rounded-2xl w-fit">
-                {[1, 2, 3].map(num => (
-                  <button
-                    key={num}
-                    onClick={() => setSelectedRound(num)}
-                    className={`px-6 py-2 rounded-xl text-sm font-bold transition-all ${selectedRound === num ? 'bg-white text-black shadow-sm' : 'text-black/40 hover:text-black'}`}
-                  >
-                    {num}차 심사
-                  </button>
-                ))}
-              </div>
-            </div>
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={() => setViewMode('stats')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all border ${
+            viewMode === 'stats'
+              ? 'bg-black text-white border-black'
+              : 'bg-white text-black/40 border-black/10 hover:border-black/30'
+          }`}
+        >
+          통계 보기
+        </button>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <div className="bg-white p-6 rounded-3xl shadow-sm border border-black/5">
-                <div className="flex items-center gap-4 mb-4">
-                  <div className="w-10 h-10 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center">
-                    <Users size={20} />
-                  </div>
-                  <span className="text-sm font-bold text-black/40 uppercase tracking-wider">제출 학생</span>
-                </div>
-                <div className="text-4xl font-bold">{Array.isArray(stats) ? stats.filter(s => s.is_submitted).length : 0}명</div>
-              </div>
+        <button
+          type="button"
+          onClick={() => setViewMode('judge-list')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all border ${
+            viewMode === 'judge-list'
+              ? 'bg-black text-white border-black'
+              : 'bg-white text-black/40 border-black/10 hover:border-black/30'
+          }`}
+        >
+          심사 목록 보기
+        </button>
+      </div>
+    </div>
 
-              <div className="bg-white p-6 rounded-3xl shadow-sm border border-black/5">
-                <div className="flex items-center gap-4 mb-4">
-                  <div className="w-10 h-10 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center">
-                    <FileText size={20} />
-                  </div>
-                  <span className="text-sm font-bold text-black/40 uppercase tracking-wider">심사 완료</span>
-                </div>
-                <div className="text-4xl font-bold">{Array.isArray(stats) ? stats.filter(s => Array.isArray(s.evaluations) && s.evaluations.length > 0).length : 0}명</div>
-              </div>
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="bg-white p-6 rounded-3xl shadow-sm border border-black/5">
+        <div className="flex items-center gap-4 mb-4">
+          <div className="w-10 h-10 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center">
+            <Users size={20} />
+          </div>
+          <span className="text-sm font-bold text-black/40 uppercase tracking-wider">제출 학생</span>
+        </div>
+        <div className="text-4xl font-bold">
+          {Array.isArray(stats) ? stats.filter(s => s.is_submitted).length : 0}명
+        </div>
+      </div>
 
-              <div className="bg-white p-6 rounded-3xl shadow-sm border border-black/5">
-                <div className="flex items-center gap-4 mb-4">
-                  <div className="w-10 h-10 bg-amber-50 text-amber-600 rounded-xl flex items-center justify-center">
-                    <BarChart3 size={20} />
-                  </div>
-                  <span className="text-sm font-bold text-black/40 uppercase tracking-wider">평균 총점</span>
-                </div>
-                <div className="text-4xl font-bold">
-                  {Array.isArray(stats)
-                    ? (
-                        stats.reduce((acc, s) => acc + (parseFloat(s.averageScore) || 0), 0) /
-                        (stats.filter(s => Array.isArray(s.evaluations) && s.evaluations.length > 0).length || 1)
-                      ).toFixed(2)
-                    : '0.00'}
-                </div>
-              </div>
-            </div>
+      <div className="bg-white p-6 rounded-3xl shadow-sm border border-black/5">
+        <div className="flex items-center gap-4 mb-4">
+          <div className="w-10 h-10 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center">
+            <FileText size={20} />
+          </div>
+          <span className="text-sm font-bold text-black/40 uppercase tracking-wider">심사 완료</span>
+        </div>
+        <div className="text-4xl font-bold">
+          {Array.isArray(stats) ? stats.filter(s => Array.isArray(s.evaluations) && s.evaluations.length > 0).length : 0}명
+        </div>
+      </div>
 
+      <div className="bg-white p-6 rounded-3xl shadow-sm border border-black/5">
+        <div className="flex items-center gap-4 mb-4">
+          <div className="w-10 h-10 bg-amber-50 text-amber-600 rounded-xl flex items-center justify-center">
+            <BarChart3 size={20} />
+          </div>
+          <span className="text-sm font-bold text-black/40 uppercase tracking-wider">평균 총점</span>
+        </div>
+        <div className="text-4xl font-bold">
+          {Array.isArray(stats)
+            ? (
+                stats.reduce((acc, s) => acc + (parseFloat(s.averageScore) || 0), 0) /
+                (stats.filter(s => Array.isArray(s.evaluations) && s.evaluations.length > 0).length || 1)
+              ).toFixed(2)
+            : '0.00'}
+        </div>
+      </div>
+    </div>
+
+    <section className="bg-white rounded-3xl shadow-sm border border-black/5 overflow-hidden">
+      <div className="p-6 border-b border-black/5 flex justify-between items-center">
+        <h3 className="text-lg font-bold">{selectedRound}차 심사 현황</h3>
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-black/30" size={18} />
+          <input
+            type="text"
+            placeholder="검색..."
+            value={searchTerm}
+            onChange={e => setSearchTerm(e.target.value)}
+            className="pl-10 pr-4 py-2 bg-black/5 rounded-xl text-sm focus:outline-none w-64"
+          />
+        </div>
+      </div>
+
+      {/* 기존 표 내용 그대로 */}
+    </section>
+  </>
+) : (
+  <JudgeDashboard user={user} entrySource="judge-list" />
+)}
+      
             <section className="bg-white rounded-3xl shadow-sm border border-black/5 overflow-hidden">
               <div className="p-6 border-b border-black/5 flex justify-between items-center">
                 <h3 className="text-lg font-bold">{selectedRound}차 심사 현황</h3>
