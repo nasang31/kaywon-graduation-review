@@ -196,6 +196,7 @@ function PrintProposalCard({ proposal, round }: { proposal: any; round: number }
               <div style={{ padding: '12px 16px', display: 'grid', gridTemplateColumns: `repeat(${proposal.evaluations.length}, 1fr)`, gap: '10px' }}>
                 {proposal.evaluations.map((e: any, i: number) => (
                   <div key={i} style={{ background: '#f9fafb', borderRadius: '8px', padding: '10px 12px', border: '1px solid #e5e7eb' }}>
+                    {/* ✅ 교수 실명 대신 익명 레이블 사용 (인쇄 전용) */}
                     <div style={{ fontWeight: 700, fontSize: '12px', marginBottom: '4px' }}>교수{i + 1}</div>
                     <div style={{ fontSize: '13px', fontWeight: 900, color: '#d97706', marginBottom: '6px' }}>{calcJudgeScore(e).toFixed(1)}점</div>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2px', fontSize: '10px', color: '#888', marginBottom: '6px' }}>
@@ -239,7 +240,7 @@ function PrintProposalCard({ proposal, round }: { proposal: any; round: number }
 interface BulkPrintModalProps {
   students: any[];
   selectedRound: number;
-  user: User; // ← 추가
+  user: User;
   onClose: () => void;
 }
 
@@ -254,43 +255,43 @@ function BulkPrintModal({ students, selectedRound, user, onClose }: BulkPrintMod
     ? students.filter(s => s.is_submitted)
     : students;
 
-  // 수정
-useEffect(() => {
-  let cancelled = false;
+  // ✅ cancelled 플래그를 useEffect 최상단에 선언, dependency에 filteredStudents.length 추가
+  useEffect(() => {
+    let cancelled = false;
 
-  const fetchAll = async () => {
-    setIsLoading(true);
-    setLoadedCount(0);
-    const results: any[] = [];
+    const fetchAll = async () => {
+      setIsLoading(true);
+      setLoadedCount(0);
+      const results: any[] = [];
 
-    for (const student of filteredStudents) {
-      if (cancelled) break; // ← 추가
-      try {
-        const res = await fetch(`/api/proposals/${student.id}?judgeId=${user.id}&role=${user.role}`);
-        if (res.ok) {
-          const data = await res.json();
-          if (!cancelled) results.push(data); // ← 추가
+      for (const student of filteredStudents) {
+        if (cancelled) break;
+        try {
+          const res = await fetch(`/api/proposals/${student.id}?judgeId=${user.id}&role=${user.role}`);
+          if (res.ok && !cancelled) {
+            const data = await res.json();
+            results.push(data);
+          }
+        } catch (err) {
+          console.error(`Failed to fetch proposal ${student.id}:`, err);
         }
-      } catch (err) {
-        console.error(`Failed to fetch proposal ${student.id}:`, err);
+        if (!cancelled) setLoadedCount(prev => prev + 1);
       }
-      if (!cancelled) setLoadedCount(prev => prev + 1); // ← 추가
-    }
 
-    if (!cancelled) { // ← 추가
-      setProposals(results);
-      setIsLoading(false);
-    }
-  };
+      if (!cancelled) {
+        setProposals(results);
+        setIsLoading(false);
+      }
+    };
 
-  fetchAll();
-  return () => { cancelled = true; }; // ← 추가
-}, [filterMode]);
+    fetchAll();
+    // ✅ 언마운트 또는 filterMode 변경 시 진행 중인 fetch 중단
+    return () => { cancelled = true; };
+  }, [filterMode, filteredStudents.length]); // ✅ filteredStudents.length 추가
 
-
+  // ✅ printRef.current null 체크 추가
   const handlePrint = () => {
-    const printContent = printRef.current;
-    if (!printContent) return;
+    if (!printRef.current) return;
 
     const printWindow = window.open('', '_blank', 'width=900,height=700');
     if (!printWindow) {
@@ -315,7 +316,7 @@ useEffect(() => {
         </style>
       </head>
       <body>
-        ${printContent.innerHTML}
+        ${printRef.current.innerHTML}
       </body>
       </html>
     `);
@@ -465,6 +466,8 @@ export default function JudgeDashboard({
   const didSetInitialRound = useRef(false);
   const latestRequestId = useRef(0);
   const latestStudentsRequestId = useRef(0);
+  // ✅ fetchPreviousProposal race condition 방지용 ref
+  const latestPrevRequestId = useRef(0);
 
   useEffect(() => {
     if (forcedRound) setSelectedRound(forcedRound);
@@ -567,13 +570,18 @@ export default function JudgeDashboard({
     }
   };
 
+  // ✅ latestPrevRequestId로 race condition 방지
   const fetchPreviousProposal = async (userId: number | string) => {
     if (selectedRound <= 1) { setPreviousProposal(null); return; }
+    const reqId = ++latestPrevRequestId.current;
     try {
       const res = await fetch(`/api/proposals/reference/${userId}/${selectedRound - 1}`);
+      if (reqId !== latestPrevRequestId.current) return;
       const data = await res.json();
+      if (reqId !== latestPrevRequestId.current) return;
       setPreviousProposal(data || null);
     } catch (err) {
+      if (reqId !== latestPrevRequestId.current) return;
       console.error('Failed to fetch previous proposal:', err);
       setPreviousProposal(null);
     }
@@ -725,28 +733,29 @@ export default function JudgeDashboard({
     setSelectedProposal(null);
   };
 
+  // ✅ 함수 닫힘 괄호 확실히 추가 — 기존 코드에서 누락되어 하위 코드 전체가 함수 내부에 갇혀 있었음
   const handlePasswordChange = async (e: React.FormEvent) => {
     e.preventDefault();
     if (passwords.new !== passwords.confirm) { alert('새 비밀번호가 일치하지 않습니다.'); return; }
     try {
-  const res = await fetch('/api/change-password', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ userId: user.id, newPassword: passwords.new }),
-  });
-  if (res.ok) {
-    alert('비밀번호가 변경되었습니다.');
-    setShowPasswordModal(false);
-    setPasswords({ current: '', new: '', confirm: '' });
-  } else {
-    const errData = await res.json().catch(() => null);
-    alert(errData?.error || '비밀번호 변경에 실패했습니다.');
-  }
-} catch (err) {
-  alert('비밀번호 변경에 실패했습니다.');
-}
-
-
+      const res = await fetch('/api/change-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.id, newPassword: passwords.new }),
+      });
+      if (res.ok) {
+        alert('비밀번호가 변경되었습니다.');
+        setShowPasswordModal(false);
+        setPasswords({ current: '', new: '', confirm: '' });
+      } else {
+        // ✅ 서버 오류 메시지 표시
+        const errData = await res.json().catch(() => null);
+        alert(errData?.error || '비밀번호 변경에 실패했습니다.');
+      }
+    } catch (err) {
+      alert('비밀번호 변경에 실패했습니다.');
+    }
+  }; // ✅ 여기서 handlePasswordChange 함수가 닫혀야 함
 
   // ── 상세 화면 ────────────────────────────────────────────────────
   if (selectedProposal) {
@@ -1099,7 +1108,6 @@ export default function JudgeDashboard({
           <p className="text-black/50 mt-1">학생들의 기획안을 검토하고 점수를 부여하세요.</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap justify-end">
-
           {/* 비밀번호 변경 — 교수만 노출 */}
           {user.role !== 'admin' && (
             <button
