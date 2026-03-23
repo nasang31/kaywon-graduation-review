@@ -1,7 +1,7 @@
 export type Role = 'student' | 'judge' | 'admin';
 
 export interface User {
-  id: number;
+  id: string;           // ✅ uuid → string
   username: string;
   role: Role;
   name: string;
@@ -16,7 +16,7 @@ export interface Round {
 }
 
 export interface Work {
-  id?: number;
+  id?: string;          // ✅ uuid → string
   workNumber: number;
   title: string;
   category: '공간설계' | '3D 프레젠테이션' | '오브제' | '디지로그';
@@ -28,8 +28,8 @@ export interface Work {
 }
 
 export interface Proposal {
-  id?: number;
-  userId: number;
+  id?: string;          // ✅ uuid → string
+  userId: string;       // ✅ uuid → string
   roundNumber: number;
   studentId: string;
   name: string;
@@ -47,15 +47,17 @@ export interface Proposal {
 }
 
 export interface Evaluation {
-  id?: number;
-  proposal_id: number;
-  judge_id: number;
+  id?: string;              // ✅ uuid → string
+  proposal_id: string;      // ✅ uuid → string
+  judge_id: string;         // ✅ uuid → string
   judge_name?: string;
   text_grade: string;
   work1_grade: string;
   work2_grade: string;
   work3_grade: string;
   comment: string;
+  is_final?: boolean;       // ✅ 누락 필드 추가
+  finalized_at?: string;    // ✅ 누락 필드 추가
   created_at?: string;
   totalScore?: number;
 }
