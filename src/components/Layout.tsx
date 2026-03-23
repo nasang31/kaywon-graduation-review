@@ -1,5 +1,4 @@
 import React from 'react';
-import { useNavigate } from 'react-router-dom';
 import { LogOut, User as UserIcon } from 'lucide-react';
 import { User } from '../types';
 
@@ -9,8 +8,21 @@ interface LayoutProps {
   onLogout: () => void;
 }
 
+// ✅ 역할 한글 레이블
+const roleLabel: Record<string, string> = {
+  student: '학생',
+  judge: '교수',
+  admin: '관리자',
+};
+
 export default function Layout({ children, user, onLogout }: LayoutProps) {
-  const navigate = useNavigate();
+
+  // ✅ 로그아웃 확인 추가
+  const handleLogout = () => {
+    if (window.confirm('로그아웃 하시겠습니까?')) {
+      onLogout();
+    }
+  };
 
   return (
     <div className="min-h-screen bg-[#F5F5F7] text-[#1D1D1F] font-sans">
@@ -21,17 +33,23 @@ export default function Layout({ children, user, onLogout }: LayoutProps) {
               <div className="w-8 h-8 bg-black rounded-lg flex items-center justify-center">
                 <span className="text-white font-bold text-xs">SP</span>
               </div>
-              <h1 className="text-lg font-semibold tracking-tight">공간연출과 졸업작품 심사</h1>
+              <h1 className="text-lg font-semibold tracking-tight">
+                공간연출과 졸업작품 심사
+              </h1>
             </div>
-            
+
             {user && (
               <div className="flex items-center gap-4">
                 <div className="flex items-center gap-2 px-3 py-1.5 bg-black/5 rounded-full">
                   <UserIcon size={16} />
-                  <span className="text-sm font-medium">{user.name} ({user.role})</span>
+                  {/* ✅ 역할 한글로 표시 */}
+                  <span className="text-sm font-medium">
+                    {user.name} ({roleLabel[user.role] ?? user.role})
+                  </span>
                 </div>
+                {/* ✅ 로그아웃 확인 추가 */}
                 <button
-                  onClick={onLogout}
+                  onClick={handleLogout}
                   className="p-2 hover:bg-black/5 rounded-full transition-colors text-red-600"
                   title="로그아웃"
                 >
