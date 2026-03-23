@@ -3,7 +3,7 @@ import { User, Proposal, GRADE_SCORES } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   ChevronRight, Star, MessageSquare, ExternalLink,
-  ArrowLeft, FileText, ShieldCheck, BarChart3, Key
+  ArrowLeft, FileText, ShieldCheck, BarChart3, Key, Printer
 } from 'lucide-react';
 
 interface JudgeDashboardProps {
@@ -14,24 +14,14 @@ interface JudgeDashboardProps {
   onBackToAdminStats?: () => void;
 }
 
-// ── 스피너 아이콘 ──────────────────────────────────────────────────
 function SpinnerIcon() {
   return (
-    <svg
-      className="animate-spin"
-      width={14}
-      height={14}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2.5"
-    >
+    <svg className="animate-spin" width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
       <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
     </svg>
   );
 }
 
-// ── 빈 평가 초기값 ────────────────────────────────────────────────
 const EMPTY_EVALUATION = {
   text_grade: '',
   work1_grade: '',
@@ -40,7 +30,6 @@ const EMPTY_EVALUATION = {
   comment: ''
 };
 
-// ── 0점(미입력) 항목 분모 제외 점수 계산 ─────────────────────────
 function calcJudgeScore(e: {
   text_grade?: string;
   work1_grade?: string;
@@ -54,9 +43,7 @@ function calcJudgeScore(e: {
     GRADE_SCORES[e.work3_grade as keyof typeof GRADE_SCORES],
   ];
   const valid = items.filter((s): s is number => typeof s === 'number' && s > 0);
-  return valid.length === 0
-    ? 0
-    : valid.reduce((a, b) => a + b, 0) / valid.length;
+  return valid.length === 0 ? 0 : valid.reduce((a, b) => a + b, 0) / valid.length;
 }
 
 function calcMyScore(s: any): number {
@@ -68,22 +55,13 @@ function calcMyScore(s: any): number {
   });
 }
 
-// ── 전체 평가자 평균 ──────────────────────────────────────────────
 function calculateAverage(evals: any[]): string {
   if (!evals || evals.length === 0) return '0.00';
-
-  const judgeScores = evals
-    .map(calcJudgeScore)
-    .filter(score => score > 0);
-
+  const judgeScores = evals.map(calcJudgeScore).filter(score => score > 0);
   if (judgeScores.length === 0) return '0.00';
-
-  return (
-    judgeScores.reduce((sum, score) => sum + score, 0) / judgeScores.length
-  ).toFixed(2);
+  return (judgeScores.reduce((sum, score) => sum + score, 0) / judgeScores.length).toFixed(2);
 }
 
-// ── draft JSON → evaluation 안전 변환 ────────────────────────────
 function parseDraft(raw: string): typeof EMPTY_EVALUATION | null {
   try {
     const p = JSON.parse(raw);
@@ -99,25 +77,357 @@ function parseDraft(raw: string): typeof EMPTY_EVALUATION | null {
   }
 }
 
-// ── 사용자 아이콘 ──────────────────────────────────────────────────
 function UserIcon({ size }: { size: number }) {
   return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
       <circle cx="12" cy="7" r="4" />
     </svg>
   );
 }
 
+// ── 일괄 인쇄용 단일 학생 카드 ─────────────────────────────────────
+function PrintProposalCard({ proposal, round }: { proposal: any; round: number }) {
+  return (
+    <div className="print-card" style={{ pageBreakAfter: 'always', padding: '32px', fontFamily: 'sans-serif' }}>
+      {/* 헤더 */}
+      <div style={{ borderBottom: '2px solid #000', paddingBottom: '12px', marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
+        <div>
+          <div style={{ fontSize: '11px', color: '#666', marginBottom: '4px', letterSpacing: '0.05em' }}>
+            {round}차 심사 기획안
+          </div>
+          <div style={{ fontSize: '26px', fontWeight: 900, letterSpacing: '-0.02em' }}>
+            {proposal.name}
+          </div>
+          <div style={{ fontSize: '12px', color: '#444', marginTop: '4px', display: 'flex', gap: '16px' }}>
+            <span>학번: {proposal.student_id || proposal.studentId}</span>
+            <span>희망진로: {proposal.career_path || proposal.careerPath || '미입력'}</span>
+          </div>
+        </div>
+        <div style={{ fontSize: '11px', color: '#888', textAlign: 'right' }}>
+          <div>출력일: {new Date().toLocaleDateString('ko-KR')}</div>
+          <div style={{ marginTop: '2px', padding: '2px 8px', background: proposal.is_submitted ? '#d1fae5' : '#fef3c7', color: proposal.is_submitted ? '#065f46' : '#92400e', borderRadius: '99px', display: 'inline-block', fontWeight: 700, fontSize: '10px' }}>
+            {proposal.is_submitted ? '최종 제출' : '미제출'}
+          </div>
+        </div>
+      </div>
+
+      {!proposal.is_submitted ? (
+        <div style={{ padding: '24px', background: '#fef2f2', borderRadius: '12px', border: '1px solid #fecaca', textAlign: 'center', color: '#991b1b', fontWeight: 700, fontSize: '13px' }}>
+          ⚠️ 자료 미제출 상태입니다. 발표 내용을 바탕으로 심사를 진행해주세요.
+        </div>
+      ) : (
+        <>
+          {/* 텍스트 정보 */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', marginBottom: '24px' }}>
+            <div style={{ display: 'grid', gap: '14px' }}>
+              {[
+                { label: '선정 텍스트 명', value: proposal.title },
+                { label: '작가', value: proposal.author },
+                { label: '장르', value: proposal.genre },
+              ].map(({ label, value }) => (
+                <div key={label}>
+                  <div style={{ fontSize: '9px', fontWeight: 700, color: '#aaa', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '3px' }}>{label}</div>
+                  <div style={{ fontSize: '14px', fontWeight: 700 }}>{value || '-'}</div>
+                </div>
+              ))}
+              <div>
+                <div style={{ fontSize: '9px', fontWeight: 700, color: '#aaa', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '3px' }}>줄거리</div>
+                <div style={{ fontSize: '12px', lineHeight: 1.7, color: '#444', whiteSpace: 'pre-wrap' }}>{proposal.plot || '-'}</div>
+              </div>
+            </div>
+            <div style={{ display: 'grid', gap: '14px', alignContent: 'start' }}>
+              {[
+                { label: '주제', value: proposal.subject },
+                { label: '선정이유', value: proposal.reason },
+              ].map(({ label, value }) => (
+                <div key={label}>
+                  <div style={{ fontSize: '9px', fontWeight: 700, color: '#aaa', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '3px' }}>{label}</div>
+                  <div style={{ fontSize: '12px', lineHeight: 1.7, color: '#444', whiteSpace: 'pre-wrap' }}>{value || '-'}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* 작품별 상세 */}
+          {(proposal.works || []).map((work: any, idx: number) => (
+            <div key={idx} style={{ border: '1px solid #e5e7eb', borderRadius: '10px', overflow: 'hidden', marginBottom: '16px', pageBreakInside: 'avoid' }}>
+              <div style={{ background: '#f9fafb', padding: '8px 16px', borderBottom: '1px solid #e5e7eb', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ background: '#000', color: '#fff', fontSize: '10px', fontWeight: 900, padding: '2px 7px', borderRadius: '4px' }}>작품{idx + 1}</span>
+                  <span style={{ fontWeight: 700, fontSize: '14px' }}>{work.title}</span>
+                </div>
+                <span style={{ fontSize: '10px', color: '#aaa', border: '1px solid #e5e7eb', padding: '2px 8px', borderRadius: '99px' }}>{work.category}</span>
+              </div>
+              <div style={{ padding: '14px 16px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                {[
+                  { label: '작업개요', value: work.summary },
+                  { label: '내용 및 목적', value: work.purpose },
+                  { label: '기대효과', value: work.effect },
+                ].map(({ label, value }) => (
+                  <div key={label}>
+                    <div style={{ fontSize: '9px', fontWeight: 700, color: '#aaa', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '3px' }}>{label}</div>
+                    <div style={{ fontSize: '11px', lineHeight: 1.65, color: '#444', whiteSpace: 'pre-wrap' }}>{value || '-'}</div>
+                  </div>
+                ))}
+                {work.keywords && (
+                  <div>
+                    <div style={{ fontSize: '9px', fontWeight: 700, color: '#aaa', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '3px' }}>키워드</div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                      {work.keywords.split(',').map((k: string) => k.trim()).filter(Boolean).map((k: string, i: number) => (
+                        <span key={i} style={{ background: '#f3f4f6', borderRadius: '6px', padding: '2px 7px', fontSize: '10px', color: '#555' }}>#{k}</span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+
+          {/* 심사 점수 요약 (평가가 있을 경우) */}
+          {proposal.evaluations && proposal.evaluations.length > 0 && (
+            <div style={{ marginTop: '16px', border: '1px solid #e5e7eb', borderRadius: '10px', overflow: 'hidden', pageBreakInside: 'avoid' }}>
+              <div style={{ background: '#f9fafb', padding: '8px 16px', borderBottom: '1px solid #e5e7eb', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontWeight: 700, fontSize: '13px' }}>심사 결과</span>
+                <span style={{ fontSize: '12px', fontWeight: 700, background: '#000', color: '#fff', padding: '2px 10px', borderRadius: '99px' }}>
+                  평균 {calculateAverage(proposal.evaluations)}점
+                </span>
+              </div>
+              <div style={{ padding: '12px 16px', display: 'grid', gridTemplateColumns: `repeat(${proposal.evaluations.length}, 1fr)`, gap: '10px' }}>
+                {proposal.evaluations.map((e: any, i: number) => (
+                  <div key={i} style={{ background: '#f9fafb', borderRadius: '8px', padding: '10px 12px', border: '1px solid #e5e7eb' }}>
+                    <div style={{ fontWeight: 700, fontSize: '12px', marginBottom: '4px' }}>{e.judge_name}</div>
+                    <div style={{ fontSize: '13px', fontWeight: 900, color: '#d97706', marginBottom: '6px' }}>{calcJudgeScore(e).toFixed(1)}점</div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2px', fontSize: '10px', color: '#888', marginBottom: '6px' }}>
+                      <span>텍스트: {e.text_grade}</span>
+                      <span>작품1: {e.work1_grade}</span>
+                      <span>작품2: {e.work2_grade}</span>
+                      <span>작품3: {e.work3_grade}</span>
+                    </div>
+                    {e.comment && (
+                      <div style={{ fontSize: '10px', color: '#555', borderTop: '1px solid #e5e7eb', paddingTop: '6px', fontStyle: 'italic', lineHeight: 1.5 }}>
+                        "{e.comment}"
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* 심사 기록란 (빈 칸 — 인쇄 후 수기용) */}
+          <div style={{ marginTop: '20px', border: '1px dashed #ccc', borderRadius: '10px', padding: '14px 16px', pageBreakInside: 'avoid' }}>
+            <div style={{ fontSize: '10px', fontWeight: 700, color: '#aaa', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '10px' }}>심사 메모란</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '10px', marginBottom: '12px' }}>
+              {['텍스트 선정', '작품1', '작품2', '작품3'].map(label => (
+                <div key={label} style={{ textAlign: 'center' }}>
+                  <div style={{ fontSize: '10px', color: '#888', marginBottom: '4px' }}>{label}</div>
+                  <div style={{ border: '1px solid #ddd', borderRadius: '6px', height: '32px' }} />
+                </div>
+              ))}
+            </div>
+            <div style={{ fontSize: '10px', color: '#888', marginBottom: '4px' }}>종합 심사평</div>
+            <div style={{ border: '1px solid #ddd', borderRadius: '6px', height: '64px' }} />
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ── 일괄 인쇄 모달 ──────────────────────────────────────────────────
+interface BulkPrintModalProps {
+  students: any[];
+  selectedRound: number;
+  onClose: () => void;
+}
+
+function BulkPrintModal({ students, selectedRound, onClose }: BulkPrintModalProps) {
+  const [proposals, setProposals] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadedCount, setLoadedCount] = useState(0);
+  const [filterMode, setFilterMode] = useState<'all' | 'submitted'>('submitted');
+  const printRef = useRef<HTMLDivElement>(null);
+
+  const filteredStudents = filterMode === 'submitted'
+    ? students.filter(s => s.is_submitted)
+    : students;
+
+  useEffect(() => {
+    const fetchAll = async () => {
+      setIsLoading(true);
+      setLoadedCount(0);
+
+      const results: any[] = [];
+
+      for (const student of filteredStudents) {
+        try {
+          const res = await fetch(`/api/proposals/${student.id}`);
+          if (res.ok) {
+            const data = await res.json();
+            results.push(data);
+          }
+        } catch (err) {
+          console.error(`Failed to fetch proposal ${student.id}:`, err);
+        }
+        setLoadedCount(prev => prev + 1);
+      }
+
+      setProposals(results);
+      setIsLoading(false);
+    };
+
+    fetchAll();
+  }, [filterMode]);
+
+  const handlePrint = () => {
+    const printContent = printRef.current;
+    if (!printContent) return;
+
+    const printWindow = window.open('', '_blank', 'width=900,height=700');
+    if (!printWindow) {
+      alert('팝업이 차단되었습니다. 팝업 차단을 해제하고 다시 시도해주세요.');
+      return;
+    }
+
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html lang="ko">
+      <head>
+        <meta charset="UTF-8" />
+        <title>${selectedRound}차 심사 기획안 일괄 인쇄</title>
+        <style>
+          * { box-sizing: border-box; margin: 0; padding: 0; }
+          body { font-family: 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif; background: #fff; color: #111; }
+          @page { margin: 15mm 15mm; size: A4; }
+          @media print {
+            .print-card { page-break-after: always; }
+            .print-card:last-child { page-break-after: avoid; }
+          }
+        </style>
+      </head>
+      <body>
+        ${printContent.innerHTML}
+      </body>
+      </html>
+    `);
+
+    printWindow.document.close();
+    printWindow.focus();
+
+    // 이미지 로드 대기 후 인쇄
+    setTimeout(() => {
+      printWindow.print();
+      printWindow.close();
+    }, 800);
+  };
+
+  return (
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95, y: 20 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.95, y: 20 }}
+        className="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden"
+      >
+        {/* 모달 헤더 */}
+        <div className="p-8 border-b border-black/5">
+          <div className="flex items-center gap-3 mb-1">
+            <div className="w-10 h-10 bg-black text-white rounded-xl flex items-center justify-center">
+              <Printer size={20} />
+            </div>
+            <h3 className="text-xl font-bold">기획안 일괄 인쇄</h3>
+          </div>
+          <p className="text-sm text-black/40 mt-2 ml-[52px]">
+            {selectedRound}차 심사 기획안을 PDF 또는 인쇄물로 출력합니다.
+          </p>
+        </div>
+
+        {/* 옵션 */}
+        <div className="p-8 space-y-6">
+          <div>
+            <label className="block text-xs font-bold text-black/40 uppercase tracking-wider mb-3">출력 대상</label>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setFilterMode('submitted')}
+                className={`flex-1 py-3 rounded-xl text-sm font-bold border transition-all
+                  ${filterMode === 'submitted' ? 'bg-black text-white border-black' : 'bg-white text-black/40 border-black/10 hover:text-black'}`}
+              >
+                제출 완료 ({students.filter(s => s.is_submitted).length}명)
+              </button>
+              <button
+                onClick={() => setFilterMode('all')}
+                className={`flex-1 py-3 rounded-xl text-sm font-bold border transition-all
+                  ${filterMode === 'all' ? 'bg-black text-white border-black' : 'bg-white text-black/40 border-black/10 hover:text-black'}`}
+              >
+                전체 ({students.length}명)
+              </button>
+            </div>
+          </div>
+
+          {/* 로딩 진행 바 */}
+          <div>
+            <div className="flex justify-between items-center mb-2">
+              <span className="text-xs font-bold text-black/40 uppercase tracking-wider">데이터 불러오는 중</span>
+              <span className="text-xs font-bold text-black/60">
+                {isLoading ? `${loadedCount} / ${filteredStudents.length}` : `${proposals.length}건 준비 완료`}
+              </span>
+            </div>
+            <div className="h-2 bg-black/5 rounded-full overflow-hidden">
+              <motion.div
+                className="h-full bg-black rounded-full"
+                animate={{
+                  width: filteredStudents.length === 0
+                    ? '100%'
+                    : `${(loadedCount / filteredStudents.length) * 100}%`
+                }}
+                transition={{ ease: 'easeOut', duration: 0.3 }}
+              />
+            </div>
+          </div>
+
+          {/* 안내 */}
+          <div className="bg-black/[0.03] rounded-2xl p-4 text-xs text-black/50 space-y-1.5 leading-relaxed">
+            <p>• 각 학생의 기획안이 한 페이지씩 구분되어 출력됩니다.</p>
+            <p>• 이미지가 포함된 경우 용량에 따라 출력 시간이 다소 걸릴 수 있습니다.</p>
+            <p>• 심사 평가가 완료된 학생은 점수가 함께 인쇄됩니다.</p>
+            <p>• 하단에 수기 심사 메모란이 포함됩니다.</p>
+          </div>
+        </div>
+
+        {/* 액션 버튼 */}
+        <div className="px-8 pb-8 flex gap-3">
+          <button
+            onClick={onClose}
+            className="flex-1 py-4 rounded-2xl font-bold border border-black/10 hover:bg-black/5 transition-all text-black/60"
+          >
+            취소
+          </button>
+          <button
+            onClick={handlePrint}
+            disabled={isLoading || proposals.length === 0}
+            className="flex-[2] py-4 rounded-2xl font-bold bg-black text-white hover:bg-black/90 transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg shadow-black/10"
+          >
+            {isLoading ? (
+              <><SpinnerIcon /> 데이터 로딩 중...</>
+            ) : (
+              <><Printer size={18} /> {proposals.length}명 기획안 인쇄하기</>
+            )}
+          </button>
+        </div>
+      </motion.div>
+
+      {/* 인쇄용 숨김 DOM — window.open으로 innerHTML 복사 */}
+      <div ref={printRef} style={{ display: 'none' }}>
+        {proposals.map((proposal, idx) => (
+          <PrintProposalCard key={idx} proposal={proposal} round={selectedRound} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── 메인 컴포넌트 ───────────────────────────────────────────────────
 export default function JudgeDashboard({
   user,
   forcedProposalId,
@@ -136,23 +446,20 @@ export default function JudgeDashboard({
   const [isSavingEvaluation, setIsSavingEvaluation] = useState(false);
   const [showRanking, setShowRanking] = useState(true);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [showBulkPrint, setShowBulkPrint] = useState(false); // ← 추가
   const [passwords, setPasswords] = useState({ current: '', new: '', confirm: '' });
   const [isEditing, setIsEditing] = useState(false);
   const [listScrollPos, setListScrollPos] = useState(0);
   const [lastSelectedId, setLastSelectedId] = useState<string | number | null>(null);
-  
   const [rounds, setRounds] = useState<any[]>([]);
   const [previousProposal, setPreviousProposal] = useState<any | null>(null);
   const [showPreviousProposal, setShowPreviousProposal] = useState(true);
   const didSetInitialRound = useRef(false);
-
   const latestRequestId = useRef(0);
   const latestStudentsRequestId = useRef(0);
 
   useEffect(() => {
-    if (forcedRound) {
-      setSelectedRound(forcedRound);
-    }
+    if (forcedRound) setSelectedRound(forcedRound);
   }, [forcedRound]);
 
   const setWorkGrade = (num: 1 | 2 | 3, grade: string) => {
@@ -169,32 +476,19 @@ export default function JudgeDashboard({
       let frames = 0;
       let rafId = 0;
       let cancelled = false;
-
       const scroll = () => {
         if (cancelled) return;
-
         const el = document.getElementById(`student-card-${lastSelectedId}`);
         if (el) {
           el.scrollIntoView({ behavior: 'auto', block: 'center' });
         } else if (listScrollPos > 0) {
           window.scrollTo(0, listScrollPos);
         }
-
         frames++;
-        if (frames < 10) {
-          rafId = requestAnimationFrame(scroll);
-        }
+        if (frames < 10) rafId = requestAnimationFrame(scroll);
       };
-
-      const t = setTimeout(() => {
-        rafId = requestAnimationFrame(scroll);
-      }, 50);
-
-      return () => {
-        cancelled = true;
-        clearTimeout(t);
-        cancelAnimationFrame(rafId);
-      };
+      const t = setTimeout(() => { rafId = requestAnimationFrame(scroll); }, 50);
+      return () => { cancelled = true; clearTimeout(t); cancelAnimationFrame(rafId); };
     }
   }, [selectedProposal, lastSelectedId, listScrollPos]);
 
@@ -206,20 +500,12 @@ export default function JudgeDashboard({
     } else {
       const y = document.body.getAttribute('data-scroll-y');
       document.body.style.overflow = '';
-      if (y) {
-        window.scrollTo(0, parseInt(y));
-        document.body.removeAttribute('data-scroll-y');
-      }
+      if (y) { window.scrollTo(0, parseInt(y)); document.body.removeAttribute('data-scroll-y'); }
     }
-    return () => {
-      document.body.style.overflow = '';
-      document.body.removeAttribute('data-scroll-y');
-    };
+    return () => { document.body.style.overflow = ''; document.body.removeAttribute('data-scroll-y'); };
   }, [zoomImage]);
 
-  useEffect(() => {
-    fetchRounds();
-  }, []);
+  useEffect(() => { fetchRounds(); }, []);
 
   useEffect(() => {
     setSelectedProposal(null);
@@ -233,10 +519,7 @@ export default function JudgeDashboard({
 
   useEffect(() => {
     if (selectedProposal && isEditing) {
-      localStorage.setItem(
-        `eval_draft_${user.id}_${selectedProposal.id}`,
-        JSON.stringify(evaluation)
-      );
+      localStorage.setItem(`eval_draft_${user.id}_${selectedProposal.id}`, JSON.stringify(evaluation));
     }
   }, [evaluation, selectedProposal, isEditing, user.id]);
 
@@ -244,17 +527,12 @@ export default function JudgeDashboard({
     try {
       const res = await fetch('/api/admin/rounds');
       const data = await res.json();
-
       if (Array.isArray(data)) {
         setRounds(data);
-
         const activeRound = data.find((r: any) => Number(r.is_open) === 1);
         if (activeRound && !didSetInitialRound.current) {
           didSetInitialRound.current = true;
-          
-          if (!forcedRound) {
-            setSelectedRound(activeRound.round_number);
-          }
+          if (!forcedRound) setSelectedRound(activeRound.round_number);
         }
       } else {
         setRounds([]);
@@ -266,31 +544,23 @@ export default function JudgeDashboard({
   };
 
   const fetchStudents = async () => {
-  const requestId = ++latestStudentsRequestId.current;
-
-  try {
-    const res = await fetch(`/api/students/${selectedRound}?judgeId=${user.id}`);
-    const data = await res.json();
-
-    if (requestId !== latestStudentsRequestId.current) return;
-
-    setStudents(Array.isArray(data) ? data : []);
-    setPreviousProposal(null);
-  } catch (err) {
-    if (requestId !== latestStudentsRequestId.current) return;
-
-    console.error('Failed to fetch students:', err);
-    setStudents([]);
-    setPreviousProposal(null);
-  }
-};
+    const requestId = ++latestStudentsRequestId.current;
+    try {
+      const res = await fetch(`/api/students/${selectedRound}?judgeId=${user.id}`);
+      const data = await res.json();
+      if (requestId !== latestStudentsRequestId.current) return;
+      setStudents(Array.isArray(data) ? data : []);
+      setPreviousProposal(null);
+    } catch (err) {
+      if (requestId !== latestStudentsRequestId.current) return;
+      console.error('Failed to fetch students:', err);
+      setStudents([]);
+      setPreviousProposal(null);
+    }
+  };
 
   const fetchPreviousProposal = async (userId: number | string) => {
-    if (selectedRound <= 1) {
-      setPreviousProposal(null);
-      return;
-    }
-
+    if (selectedRound <= 1) { setPreviousProposal(null); return; }
     try {
       const res = await fetch(`/api/proposals/reference/${userId}/${selectedRound - 1}`);
       const data = await res.json();
@@ -301,82 +571,45 @@ export default function JudgeDashboard({
     }
   };
 
-   const handleSelectStudent = async (
-  id: string | number,
-  direction: 'prev' | 'next' | null = null
-) => {
+  const handleSelectStudent = async (id: string | number, direction: 'prev' | 'next' | null = null) => {
     if (!selectedProposal) setListScrollPos(window.scrollY);
     setLastSelectedId(id);
     setNavDirection(direction);
-
     const requestId = ++latestRequestId.current;
-
     try {
       setIsNavigating(true);
       const res = await fetch(`/api/proposals/${id}?judgeId=${user.id}&role=${user.role}`);
-      if (!res.ok) {
-        alert('학생 정보를 불러오지 못했습니다.');
-        return;
-      }
-
+      if (!res.ok) { alert('학생 정보를 불러오지 못했습니다.'); return; }
       const data = await res.json();
-
       if (requestId !== latestRequestId.current) return;
-
       setSelectedProposal(data);
       await fetchPreviousProposal((data as any).user_id);
-
       const myEval = data.evaluations?.find((e: any) => e.judge_id === user.id);
-
       if (myEval) {
-        setEvaluation({
-          text_grade: myEval.text_grade || '',
-          work1_grade: myEval.work1_grade || '',
-          work2_grade: myEval.work2_grade || '',
-          work3_grade: myEval.work3_grade || '',
-          comment: myEval.comment || ''
-        });
+        setEvaluation({ text_grade: myEval.text_grade || '', work1_grade: myEval.work1_grade || '', work2_grade: myEval.work2_grade || '', work3_grade: myEval.work3_grade || '', comment: myEval.comment || '' });
         setIsEditing(false);
       } else {
         const raw = localStorage.getItem(`eval_draft_${user.id}_${id}`);
-        setEvaluation(
-          raw
-            ? (parseDraft(raw) ?? { ...EMPTY_EVALUATION })
-            : { ...EMPTY_EVALUATION }
-        );
+        setEvaluation(raw ? (parseDraft(raw) ?? { ...EMPTY_EVALUATION }) : { ...EMPTY_EVALUATION });
         setIsEditing(true);
       }
     } catch (err) {
       console.error(err);
     } finally {
-      if (requestId === latestRequestId.current) {
-        setIsNavigating(false);
-        setNavDirection(null);
-      }
+      if (requestId === latestRequestId.current) { setIsNavigating(false); setNavDirection(null); }
     }
   };
 
   const refreshCurrentProposal = async (proposalId: number | string) => {
     try {
-      const res = await fetch(
-        `/api/proposals/${proposalId}?judgeId=${user.id}&role=${user.role}`
-      );
+      const res = await fetch(`/api/proposals/${proposalId}?judgeId=${user.id}&role=${user.role}`);
       if (!res.ok) return;
-
       const data = await res.json();
       setSelectedProposal(data);
       await fetchPreviousProposal((data as any).user_id);
-
       const myEval = data.evaluations?.find((e: any) => e.judge_id === user.id);
-
       if (myEval) {
-        setEvaluation({
-          text_grade: myEval.text_grade || '',
-          work1_grade: myEval.work1_grade || '',
-          work2_grade: myEval.work2_grade || '',
-          work3_grade: myEval.work3_grade || '',
-          comment: myEval.comment || '',
-        });
+        setEvaluation({ text_grade: myEval.text_grade || '', work1_grade: myEval.work1_grade || '', work2_grade: myEval.work2_grade || '', work3_grade: myEval.work3_grade || '', comment: myEval.comment || '' });
         setIsEditing(false);
       } else {
         setEvaluation({ ...EMPTY_EVALUATION });
@@ -394,42 +627,25 @@ export default function JudgeDashboard({
 
   const saveEvaluationToServer = async () => {
     if (!selectedProposal) return;
-
-    if (
-      !evaluation.text_grade ||
-      !evaluation.work1_grade ||
-      !evaluation.work2_grade ||
-      !evaluation.work3_grade
-    ) {
+    if (!evaluation.text_grade || !evaluation.work1_grade || !evaluation.work2_grade || !evaluation.work3_grade) {
       alert('모든 항목의 등급을 선택해주세요.');
       return;
     }
-
     setIsSavingEvaluation(true);
     try {
       const response = await fetch('/api/evaluations', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          proposalId: selectedProposal.id,
-          judgeId: user.id,
-          ...evaluation
-        }),
+        body: JSON.stringify({ proposalId: selectedProposal.id, judgeId: user.id, ...evaluation }),
       });
-
       if (!response.ok) {
         const errorData = await response.json().catch(() => null);
         alert(errorData?.error || '심사 저장에 실패했습니다. 다시 시도해주세요.');
         return;
       }
-
       localStorage.removeItem(`eval_draft_${user.id}_${selectedProposal.id}`);
       setIsEditing(false);
-
-      await Promise.all([
-        fetchStudents(),
-        refreshCurrentProposal(selectedProposal.id),
-      ]);
+      await Promise.all([fetchStudents(), refreshCurrentProposal(selectedProposal.id)]);
     } catch (err) {
       console.error(err);
       alert('네트워크 오류가 발생했습니다.');
@@ -440,26 +656,14 @@ export default function JudgeDashboard({
 
   const handleCancelEvaluation = async () => {
     if (!selectedProposal || !confirm('심사 내역을 삭제하시겠습니까?')) return;
-
     setIsSavingEvaluation(true);
     try {
-      const res = await fetch(
-        `/api/evaluations/${selectedProposal.id}/${user.id}`,
-        { method: 'DELETE' }
-      );
-      if (!res.ok) {
-        alert('심사 삭제에 실패했습니다. 다시 시도해주세요.');
-        return;
-      }
-
+      const res = await fetch(`/api/evaluations/${selectedProposal.id}/${user.id}`, { method: 'DELETE' });
+      if (!res.ok) { alert('심사 삭제에 실패했습니다. 다시 시도해주세요.'); return; }
       alert('심사가 취소되었습니다.');
       localStorage.removeItem(`eval_draft_${user.id}_${selectedProposal.id}`);
       setEvaluation({ ...EMPTY_EVALUATION });
-
-      await Promise.all([
-        fetchStudents(),
-        refreshCurrentProposal(selectedProposal.id),
-      ]);
+      await Promise.all([fetchStudents(), refreshCurrentProposal(selectedProposal.id)]);
     } catch (err) {
       console.error(err);
       alert('네트워크 오류가 발생했습니다.');
@@ -469,163 +673,93 @@ export default function JudgeDashboard({
   };
 
   const handleAdminDeleteEvaluation = async (judgeEvaluation: any) => {
-  if (!selectedProposal) return;
-
-  const ok = window.confirm(
-    `${selectedProposal.name} 학생의 ${selectedRound}차 심사에서\n` +
-    `${judgeEvaluation.judge_name} 교수 평가를 삭제하시겠습니까?\n\n` +
-    `삭제 후 복구할 수 없습니다.`
-  );
-
-  if (!ok) return;
-
-  setIsSavingEvaluation(true);
-
-  try {
-    const res = await fetch(
-      `/api/evaluations/${selectedProposal.id}/${judgeEvaluation.judge_id}`,
-      { method: 'DELETE' }
-    );
-
-    const data = await res.json().catch(() => null);
-
-    if (!res.ok) {
-      alert(data?.error || '평가 삭제에 실패했습니다.');
-      return;
+    if (!selectedProposal) return;
+    const ok = window.confirm(`${selectedProposal.name} 학생의 ${selectedRound}차 심사에서\n${judgeEvaluation.judge_name} 교수 평가를 삭제하시겠습니까?\n\n삭제 후 복구할 수 없습니다.`);
+    if (!ok) return;
+    setIsSavingEvaluation(true);
+    try {
+      const res = await fetch(`/api/evaluations/${selectedProposal.id}/${judgeEvaluation.judge_id}`, { method: 'DELETE' });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) { alert(data?.error || '평가 삭제에 실패했습니다.'); return; }
+      alert('해당 교수 평가가 삭제되었습니다.');
+      await Promise.all([fetchStudents(), refreshCurrentProposal(selectedProposal.id)]);
+    } catch (err) {
+      console.error(err);
+      alert('네트워크 오류가 발생했습니다.');
+    } finally {
+      setIsSavingEvaluation(false);
     }
-
-    alert('해당 교수 평가가 삭제되었습니다.');
-
-    await Promise.all([
-      fetchStudents(),
-      refreshCurrentProposal(selectedProposal.id),
-    ]);
-  } catch (err) {
-    console.error(err);
-    alert('네트워크 오류가 발생했습니다.');
-  } finally {
-    setIsSavingEvaluation(false);
-  }
-};
+  };
 
   const handleAdminResetProposal = async () => {
-  if (!selectedProposal) return;
-
-  const ok = window.confirm(
-    `${selectedProposal.name} 학생의 ${selectedRound}차 제출안을 초기화하시겠습니까?\n\n` +
-    `작품, 이미지, 교수 평가가 함께 삭제되며 복구할 수 없습니다.`
-  );
-
-  if (!ok) return;
-
-  setIsSavingEvaluation(true);
-
-  try {
-    const res = await fetch(
-      `/api/admin/proposals/${selectedProposal.id}/reset`,
-      { method: 'DELETE' }
-    );
-
-    const data = await res.json().catch(() => null);
-
-    if (!res.ok) {
-      alert(data?.error || '제출안 초기화에 실패했습니다.');
-      return;
+    if (!selectedProposal) return;
+    const ok = window.confirm(`${selectedProposal.name} 학생의 ${selectedRound}차 제출안을 초기화하시겠습니까?\n\n작품, 이미지, 교수 평가가 함께 삭제되며 복구할 수 없습니다.`);
+    if (!ok) return;
+    setIsSavingEvaluation(true);
+    try {
+      const res = await fetch(`/api/admin/proposals/${selectedProposal.id}/reset`, { method: 'DELETE' });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) { alert(data?.error || '제출안 초기화에 실패했습니다.'); return; }
+      alert('해당 차수 제출안이 초기화되었습니다.');
+      await fetchStudents();
+      setPreviousProposal(null);
+      if (entrySource === 'admin' && onBackToAdminStats) { onBackToAdminStats(); } else { setSelectedProposal(null); }
+    } catch (err) {
+      console.error(err);
+      alert('네트워크 오류가 발생했습니다.');
+    } finally {
+      setIsSavingEvaluation(false);
     }
-
-   alert('해당 차수 제출안이 초기화되었습니다.');
-
-await fetchStudents();
-setPreviousProposal(null);
-
-if (entrySource === 'admin' && onBackToAdminStats) {
-  onBackToAdminStats();
-} else {
-  setSelectedProposal(null);
-}
-  } catch (err) {
-    console.error(err);
-    alert('네트워크 오류가 발생했습니다.');
-  } finally {
-    setIsSavingEvaluation(false);
-  }
-};
+  };
 
   const handleBackFromDetail = () => {
-  if (entrySource === 'admin' && onBackToAdminStats) {
-    onBackToAdminStats();
-    return;
-  }
+    if (entrySource === 'admin' && onBackToAdminStats) { onBackToAdminStats(); return; }
+    setSelectedProposal(null);
+  };
 
-  setSelectedProposal(null);
-};
-  
   const handlePasswordChange = async (e: React.FormEvent) => {
-  e.preventDefault();
-
-  if (passwords.new !== passwords.confirm) {
-    alert('새 비밀번호가 일치하지 않습니다.');
-    return;
-  }
-
-  try {
-    const res = await fetch('/api/change-password', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId: user.id, newPassword: passwords.new }),
-    });
-
-    if (res.ok) {
-      alert('비밀번호가 변경되었습니다.');
-      setShowPasswordModal(false);
-      setPasswords({ current: '', new: '', confirm: '' });
-    } else {
+    e.preventDefault();
+    if (passwords.new !== passwords.confirm) { alert('새 비밀번호가 일치하지 않습니다.'); return; }
+    try {
+      const res = await fetch('/api/change-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.id, newPassword: passwords.new }),
+      });
+      if (res.ok) {
+        alert('비밀번호가 변경되었습니다.');
+        setShowPasswordModal(false);
+        setPasswords({ current: '', new: '', confirm: '' });
+      } else {
+        alert('비밀번호 변경에 실패했습니다.');
+      }
+    } catch (err) {
       alert('비밀번호 변경에 실패했습니다.');
     }
-  } catch (err) {
-    alert('비밀번호 변경에 실패했습니다.');
-  }
-};
-  
+  };
+
+  // ── 상세 화면 ────────────────────────────────────────────────────
   if (selectedProposal) {
     const currentIndex = students.findIndex(s => s.id === selectedProposal.id);
     const prevStudent = currentIndex > 0 ? students[currentIndex - 1] : null;
     const nextStudent = currentIndex < students.length - 1 ? students[currentIndex + 1] : null;
-
     const isLocked = isNavigating || isSavingEvaluation;
 
     return (
       <div className="space-y-8 pb-20">
         <div className="flex justify-between items-center">
-          <button
-           onClick={handleBackFromDetail}
-            className="flex items-center gap-2 text-black/50 hover:text-black transition-colors"
-          >
+          <button onClick={handleBackFromDetail} className="flex items-center gap-2 text-black/50 hover:text-black transition-colors">
             <ArrowLeft size={20} /> 목록으로 돌아가기
           </button>
           <div className="flex gap-2">
             {prevStudent && (
-              <button
-                onClick={() => handleSelectStudent(prevStudent.id, 'prev')}
-                disabled={isLocked}
-                className="px-4 py-2 bg-white border border-black/10 rounded-xl text-xs font-bold hover:bg-black/5 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {isNavigating && navDirection === 'prev'
-                  ? <><SpinnerIcon /> 이동 중...</>
-                  : <><ArrowLeft size={14} /> 이전 학생</>
-                }
+              <button onClick={() => handleSelectStudent(prevStudent.id, 'prev')} disabled={isLocked} className="px-4 py-2 bg-white border border-black/10 rounded-xl text-xs font-bold hover:bg-black/5 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+                {isNavigating && navDirection === 'prev' ? <><SpinnerIcon /> 이동 중...</> : <><ArrowLeft size={14} /> 이전 학생</>}
               </button>
             )}
             {nextStudent && (
-              <button
-                onClick={() => handleSelectStudent(nextStudent.id, 'next')}
-                disabled={isLocked}
-                className="px-4 py-2 bg-white border border-black/10 rounded-xl text-xs font-bold hover:bg-black/5 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {isNavigating && navDirection === 'next'
-                  ? <><SpinnerIcon /> 이동 중...</>
-                  : <>다음 학생 <ChevronRight size={14} /></>
-                }
+              <button onClick={() => handleSelectStudent(nextStudent.id, 'next')} disabled={isLocked} className="px-4 py-2 bg-white border border-black/10 rounded-xl text-xs font-bold hover:bg-black/5 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+                {isNavigating && navDirection === 'next' ? <><SpinnerIcon /> 이동 중...</> : <>다음 학생 <ChevronRight size={14} /></>}
               </button>
             )}
           </div>
@@ -634,9 +768,7 @@ if (entrySource === 'admin' && onBackToAdminStats) {
         <div className="space-y-8">
           {!selectedProposal.is_submitted ? (
             <section className="bg-white p-12 rounded-3xl shadow-sm border border-black/5 flex flex-col items-center justify-center text-center space-y-6">
-              <div className="w-20 h-20 bg-red-50 text-red-600 rounded-3xl flex items-center justify-center shadow-inner">
-                <FileText size={40} />
-              </div>
+              <div className="w-20 h-20 bg-red-50 text-red-600 rounded-3xl flex items-center justify-center shadow-inner"><FileText size={40} /></div>
               <div>
                 <h2 className="text-4xl font-black tracking-tight mb-4">{selectedProposal.name}</h2>
                 <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2 text-sm font-bold">
@@ -646,34 +778,26 @@ if (entrySource === 'admin' && onBackToAdminStats) {
                 </div>
               </div>
               <div className="bg-red-50/50 px-6 py-3 rounded-2xl border border-red-100">
-                <p className="text-red-600 text-sm font-bold">
-                  ⚠️ 자료 미제출 상태입니다. 발표 내용을 바탕으로 심사를 진행해 주세요.
-                </p>
+                <p className="text-red-600 text-sm font-bold">⚠️ 자료 미제출 상태입니다. 발표 내용을 바탕으로 심사를 진행해 주세요.</p>
               </div>
             </section>
           ) : (
             <section className="bg-white p-8 rounded-3xl shadow-sm border border-black/5">
-               <div className="flex justify-between items-start mb-8 border-b border-black/5 pb-6 gap-4">
-  <div>
-    <h2 className="text-4xl font-black tracking-tight mb-4">{selectedProposal.name}</h2>
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm font-bold">
-      <span>학번: {selectedProposal.studentId || selectedProposal.student_id}</span>
-      <span className="w-px h-3 bg-black/20" />
-      <span>희망진로: {selectedProposal.careerPath || selectedProposal.career_path || '미입력'}</span>
-    </div>
-  </div>
-
-  {user.role === 'admin' && (
-    <button
-      type="button"
-      onClick={handleAdminResetProposal}
-      disabled={isSavingEvaluation}
-      className="px-4 py-2 bg-red-50 text-red-700 border border-red-100 rounded-xl text-xs font-bold hover:bg-red-100 transition-all disabled:opacity-50"
-    >
-      해당 차수 초기화
-    </button>
-  )}
-</div>
+              <div className="flex justify-between items-start mb-8 border-b border-black/5 pb-6 gap-4">
+                <div>
+                  <h2 className="text-4xl font-black tracking-tight mb-4">{selectedProposal.name}</h2>
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm font-bold">
+                    <span>학번: {selectedProposal.studentId || selectedProposal.student_id}</span>
+                    <span className="w-px h-3 bg-black/20" />
+                    <span>희망진로: {selectedProposal.careerPath || selectedProposal.career_path || '미입력'}</span>
+                  </div>
+                </div>
+                {user.role === 'admin' && (
+                  <button type="button" onClick={handleAdminResetProposal} disabled={isSavingEvaluation} className="px-4 py-2 bg-red-50 text-red-700 border border-red-100 rounded-xl text-xs font-bold hover:bg-red-100 transition-all disabled:opacity-50">
+                    해당 차수 초기화
+                  </button>
+                )}
+              </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
                 <div className="space-y-8">
                   {([
@@ -684,11 +808,7 @@ if (entrySource === 'admin' && onBackToAdminStats) {
                   ] as const).map(({ label, value, multiline }) => (
                     <div key={label}>
                       <h4 className="text-xs font-bold text-black/30 uppercase tracking-widest mb-3">{label}</h4>
-                      <p className={`break-words ${multiline
-                        ? 'text-base leading-relaxed whitespace-pre-wrap text-black/70'
-                        : 'text-xl font-bold text-black/80'}`}>
-                        {value}
-                      </p>
+                      <p className={`break-words ${multiline ? 'text-base leading-relaxed whitespace-pre-wrap text-black/70' : 'text-xl font-bold text-black/80'}`}>{value}</p>
                     </div>
                   ))}
                 </div>
@@ -707,80 +827,47 @@ if (entrySource === 'admin' && onBackToAdminStats) {
             </section>
           )}
 
-{selectedRound > 1 && previousProposal && (
-  <section className="bg-blue-50 border border-blue-100 rounded-3xl p-6">
-    <div className="flex items-center justify-between mb-4">
-      <h3 className="text-lg font-bold text-blue-800">
-        {selectedRound - 1}차 제출안 참고
-      </h3>
-      <button
-        type="button"
-        onClick={() => setShowPreviousProposal(v => !v)}
-        className="px-3 py-1.5 bg-white border border-blue-100 rounded-xl text-xs font-bold hover:bg-blue-100 transition-all"
-      >
-        {showPreviousProposal ? '숨기기' : '보기'}
-      </button>
-    </div>
-
-    {showPreviousProposal && (
-      <div className="space-y-5 text-sm text-black/70">
-        <div>
-          <span className="font-bold">텍스트명:</span> {previousProposal.title || '-'}
-        </div>
-        <div>
-          <span className="font-bold">작가명:</span> {previousProposal.author || '-'}
-        </div>
-        <div>
-          <span className="font-bold">주제:</span> {previousProposal.subject || '-'}
-        </div>
-
-        {[1, 2, 3].map((num) => {
-          const work = (previousProposal.works || []).find(
-            (w: any) => Number(w.work_number ?? w.workNumber) === num
-          );
-
-          return (
-            <div
-              key={num}
-              className="pt-2 border-t border-blue-100 first:border-t-0 first:pt-0"
-            >
-              <div className="font-bold text-blue-900 mb-2">
-                작품{num}: {work?.title || '-'}
+          {selectedRound > 1 && previousProposal && (
+            <section className="bg-blue-50 border border-blue-100 rounded-3xl p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-bold text-blue-800">{selectedRound - 1}차 제출안 참고</h3>
+                <button type="button" onClick={() => setShowPreviousProposal(v => !v)} className="px-3 py-1.5 bg-white border border-blue-100 rounded-xl text-xs font-bold hover:bg-blue-100 transition-all">
+                  {showPreviousProposal ? '숨기기' : '보기'}
+                </button>
               </div>
-              <div>
-                <span className="font-bold">작업개요:</span> {work?.summary || '-'}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    )}
-  </section>
-)}
+              {showPreviousProposal && (
+                <div className="space-y-5 text-sm text-black/70">
+                  <div><span className="font-bold">텍스트명:</span> {previousProposal.title || '-'}</div>
+                  <div><span className="font-bold">작가명:</span> {previousProposal.author || '-'}</div>
+                  <div><span className="font-bold">주제:</span> {previousProposal.subject || '-'}</div>
+                  {[1, 2, 3].map((num) => {
+                    const work = (previousProposal.works || []).find((w: any) => Number(w.work_number ?? w.workNumber) === num);
+                    return (
+                      <div key={num} className="pt-2 border-t border-blue-100 first:border-t-0 first:pt-0">
+                        <div className="font-bold text-blue-900 mb-2">작품{num}: {work?.title || '-'}</div>
+                        <div><span className="font-bold">작업개요:</span> {work?.summary || '-'}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+          )}
 
           {Number(selectedProposal.is_submitted) === 1 && (
             <div className="space-y-8">
               <h3 className="text-2xl font-bold px-4">작품별 상세 내용</h3>
               {selectedProposal.works?.map((work, idx) => {
-                const keywords = (work.keywords ?? '')
-                  .split(',')
-                  .map((k: string) => k.trim())
-                  .filter(Boolean);
-
+                const keywords = (work.keywords ?? '').split(',').map((k: string) => k.trim()).filter(Boolean);
                 return (
                   <section key={idx} className="bg-white rounded-3xl shadow-sm border border-black/5 overflow-hidden">
                     <div className="bg-black/[0.02] px-8 py-4 border-b border-black/5 flex justify-between items-center">
                       <div className="flex items-center gap-3">
-                        <span className="text-xs font-black bg-black text-white px-2 py-1 rounded-md uppercase tracking-tighter">
-                          작품{idx + 1}
-                        </span>
+                        <span className="text-xs font-black bg-black text-white px-2 py-1 rounded-md uppercase tracking-tighter">작품{idx + 1}</span>
                         <h3 className="text-lg font-bold text-black/80">{work.title}</h3>
                       </div>
-                      <span className="px-3 py-1 bg-white border border-black/10 text-black/40 text-[10px] font-bold rounded-full uppercase tracking-widest">
-                        {work.category}
-                      </span>
+                      <span className="px-3 py-1 bg-white border border-black/10 text-black/40 text-[10px] font-bold rounded-full uppercase tracking-widest">{work.category}</span>
                     </div>
-
                     <div className="p-8 grid grid-cols-1 lg:grid-cols-2 gap-12">
                       <div className="space-y-6">
                         {([
@@ -797,32 +884,18 @@ if (entrySource === 'admin' && onBackToAdminStats) {
                           <h4 className="text-[10px] font-bold text-black/30 uppercase tracking-widest mb-2">키워드</h4>
                           <div className="flex flex-wrap gap-2">
                             {keywords.length > 0 ? keywords.map((k: string, i: number) => (
-                              <span key={i} className="px-3 py-1 bg-black/5 rounded-lg text-xs font-medium text-black/60 break-words">
-                                #{k}
-                              </span>
-                            )) : (
-                              <span className="text-xs text-black/20">키워드 없음</span>
-                            )}
+                              <span key={i} className="px-3 py-1 bg-black/5 rounded-lg text-xs font-medium text-black/60 break-words">#{k}</span>
+                            )) : <span className="text-xs text-black/20">키워드 없음</span>}
                           </div>
                         </div>
                       </div>
-
                       <div className="space-y-4">
                         <h4 className="text-[10px] font-bold text-black/30 uppercase tracking-widest mb-2">제출 이미지</h4>
                         <div className="grid grid-cols-2 gap-4">
                           {work.images && work.images.length > 0 ? (
                             work.images.map((img: string, i: number) => (
-                              <div
-                                key={i}
-                                className="group relative aspect-video rounded-2xl overflow-hidden border border-black/5 cursor-zoom-in shadow-sm"
-                                onClick={() => { setZoomImage(img); setZoomScale(1); }}
-                              >
-                                <img
-                                  src={img}
-                                  alt={`${work.title} ${i}`}
-                                  className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
-                                  loading="lazy"
-                                />
+                              <div key={i} className="group relative aspect-video rounded-2xl overflow-hidden border border-black/5 cursor-zoom-in shadow-sm" onClick={() => { setZoomImage(img); setZoomScale(1); }}>
+                                <img src={img} alt={`${work.title} ${i}`} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" loading="lazy" />
                                 <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
                                   <ExternalLink className="text-white opacity-0 group-hover:opacity-100 transition-opacity" size={24} />
                                 </div>
@@ -848,53 +921,28 @@ if (entrySource === 'admin' && onBackToAdminStats) {
               {user.role !== 'admin' ? (
                 <section className="bg-white p-8 rounded-3xl shadow-sm border border-black/5">
                   <h3 className="text-xl font-bold mb-6 flex items-center gap-2">
-                    <Star className="text-amber-400 fill-amber-400" size={20} />
-                    심사 평가 등록
+                    <Star className="text-amber-400 fill-amber-400" size={20} /> 심사 평가 등록
                   </h3>
-
                   <form onSubmit={handleSubmitEvaluation} className="space-y-8">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                       <div className={!isEditing ? 'opacity-40' : ''}>
-                        <label className="block text-xs font-bold text-black/40 uppercase mb-3">
-                          텍스트 선정 등급
-                        </label>
+                        <label className="block text-xs font-bold text-black/40 uppercase mb-3">텍스트 선정 등급</label>
                         <div className="grid grid-cols-3 gap-1">
                           {Object.keys(GRADE_SCORES).map(g => (
-                            <button
-                              key={g}
-                              type="button"
-                              disabled={!isEditing}
-                              onClick={() => setEvaluation(prev => ({ ...prev, text_grade: g }))}
-                              className={`py-2 rounded-lg text-xs font-bold border transition-all
-                                ${evaluation.text_grade === g
-                                  ? 'bg-black text-white border-black'
-                                  : 'bg-white text-black/40 border-black/10 hover:border-black/30'}
-                                disabled:cursor-not-allowed`}
-                            >
+                            <button key={g} type="button" disabled={!isEditing} onClick={() => setEvaluation(prev => ({ ...prev, text_grade: g }))}
+                              className={`py-2 rounded-lg text-xs font-bold border transition-all ${evaluation.text_grade === g ? 'bg-black text-white border-black' : 'bg-white text-black/40 border-black/10 hover:border-black/30'} disabled:cursor-not-allowed`}>
                               {g}
                             </button>
                           ))}
                         </div>
                       </div>
-
                       {([1, 2, 3] as const).map(num => (
                         <div key={num} className={!isEditing ? 'opacity-40' : ''}>
-                          <label className="block text-xs font-bold text-black/40 uppercase mb-3">
-                            작품{num} 등급
-                          </label>
+                          <label className="block text-xs font-bold text-black/40 uppercase mb-3">작품{num} 등급</label>
                           <div className="grid grid-cols-3 gap-1">
                             {Object.keys(GRADE_SCORES).map(g => (
-                              <button
-                                key={g}
-                                type="button"
-                                disabled={!isEditing}
-                                onClick={() => setWorkGrade(num, g)}
-                                className={`py-2 rounded-lg text-xs font-bold border transition-all
-                                  ${evaluation[`work${num}_grade` as keyof typeof evaluation] === g
-                                    ? 'bg-black text-white border-black'
-                                    : 'bg-white text-black/40 border-black/10 hover:border-black/30'}
-                                  disabled:cursor-not-allowed`}
-                              >
+                              <button key={g} type="button" disabled={!isEditing} onClick={() => setWorkGrade(num, g)}
+                                className={`py-2 rounded-lg text-xs font-bold border transition-all ${evaluation[`work${num}_grade` as keyof typeof evaluation] === g ? 'bg-black text-white border-black' : 'bg-white text-black/40 border-black/10 hover:border-black/30'} disabled:cursor-not-allowed`}>
                                 {g}
                               </button>
                             ))}
@@ -902,72 +950,37 @@ if (entrySource === 'admin' && onBackToAdminStats) {
                         </div>
                       ))}
                     </div>
-
                     <div className={!isEditing ? 'opacity-40' : ''}>
                       <label className="block text-xs font-bold text-black/40 uppercase mb-2">종합 심사평</label>
-                      <textarea
-                        value={evaluation.comment}
-                        disabled={!isEditing}
-                        onChange={e => setEvaluation(prev => ({ ...prev, comment: e.target.value }))}
+                      <textarea value={evaluation.comment} disabled={!isEditing} onChange={e => setEvaluation(prev => ({ ...prev, comment: e.target.value }))}
                         className="w-full px-4 py-3 rounded-xl border border-black/10 focus:ring-2 focus:ring-black/5 outline-none min-h-[120px] text-sm disabled:cursor-not-allowed"
-                        placeholder="학생에게 전달될 구체적인 피드백을 작성해주세요. (선택 사항)"
-                      />
+                        placeholder="학생에게 전달될 구체적인 피드백을 작성해주세요. (선택 사항)" />
                     </div>
-
                     <div className="flex gap-3">
                       {!isEditing ? (
                         <div className="w-full flex gap-3">
-                          <button
-                            type="button"
-                            onClick={() => setIsEditing(true)}
-                            className="flex-1 bg-white text-black border border-black/10 py-4 rounded-xl font-bold hover:bg-black/5 transition-all flex items-center justify-center gap-2"
-                          >
+                          <button type="button" onClick={() => setIsEditing(true)} className="flex-1 bg-white text-black border border-black/10 py-4 rounded-xl font-bold hover:bg-black/5 transition-all flex items-center justify-center gap-2">
                             <FileText size={18} /> 심사 수정 시작하기
                           </button>
-                          <button
-                            type="button"
-                            onClick={handleCancelEvaluation}
-                            disabled={isLocked}
-                            className="px-6 bg-red-50 text-red-500 border border-red-100 py-4 rounded-xl font-bold hover:bg-red-100 transition-all disabled:opacity-50"
-                          >
+                          <button type="button" onClick={handleCancelEvaluation} disabled={isLocked} className="px-6 bg-red-50 text-red-500 border border-red-100 py-4 rounded-xl font-bold hover:bg-red-100 transition-all disabled:opacity-50">
                             삭제
                           </button>
                         </div>
                       ) : (
                         <>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const myEval = selectedProposal.evaluations?.find(
-                                (e: any) => e.judge_id === user.id
-                              );
-                              if (myEval) {
-                                setEvaluation({
-                                  text_grade: myEval.text_grade || '',
-                                  work1_grade: myEval.work1_grade || '',
-                                  work2_grade: myEval.work2_grade || '',
-                                  work3_grade: myEval.work3_grade || '',
-                                  comment: myEval.comment || ''
-                                });
-                                setIsEditing(false);
-                              } else {
-                                setSelectedProposal(null);
-                              }
-                            }}
-                            className="flex-1 bg-white text-black border border-black/10 py-4 rounded-xl font-bold hover:bg-black/5 transition-all"
-                          >
+                          <button type="button" onClick={() => {
+                            const myEval = selectedProposal.evaluations?.find((e: any) => e.judge_id === user.id);
+                            if (myEval) {
+                              setEvaluation({ text_grade: myEval.text_grade || '', work1_grade: myEval.work1_grade || '', work2_grade: myEval.work2_grade || '', work3_grade: myEval.work3_grade || '', comment: myEval.comment || '' });
+                              setIsEditing(false);
+                            } else {
+                              setSelectedProposal(null);
+                            }
+                          }} className="flex-1 bg-white text-black border border-black/10 py-4 rounded-xl font-bold hover:bg-black/5 transition-all">
                             취소
                           </button>
-                          <button
-                            type="submit"
-                            disabled={isSavingEvaluation}
-                            className="flex-[2] bg-black text-white py-4 rounded-xl font-bold hover:bg-black/90 transition-all disabled:opacity-50 shadow-lg shadow-black/10"
-                          >
-                            {isSavingEvaluation ? (
-                              <span className="flex items-center justify-center gap-2">
-                                <SpinnerIcon /> 저장 중...
-                              </span>
-                            ) : '심사 완료 및 저장'}
+                          <button type="submit" disabled={isSavingEvaluation} className="flex-[2] bg-black text-white py-4 rounded-xl font-bold hover:bg-black/90 transition-all disabled:opacity-50 shadow-lg shadow-black/10">
+                            {isSavingEvaluation ? <span className="flex items-center justify-center gap-2"><SpinnerIcon /> 저장 중...</span> : '심사 완료 및 저장'}
                           </button>
                         </>
                       )}
@@ -981,55 +994,39 @@ if (entrySource === 'admin' && onBackToAdminStats) {
                 </div>
               )}
             </div>
-
             <div className="lg:col-span-1 space-y-6">
               {user.role === 'admin' && (
                 <section className="bg-white p-8 rounded-3xl shadow-sm border border-black/5">
                   <h3 className="text-lg font-bold mb-6 flex items-center justify-between">
                     전체 교수진 평가
-                    <span className="text-xs bg-black text-white px-2 py-1 rounded-full">
-                      평균 {calculateAverage(selectedProposal.evaluations || [])}점
-                    </span>
+                    <span className="text-xs bg-black text-white px-2 py-1 rounded-full">평균 {calculateAverage(selectedProposal.evaluations || [])}점</span>
                   </h3>
                   <div className="space-y-4">
-                     {(selectedProposal.evaluations?.length ?? 0) > 0 ? (
-  selectedProposal.evaluations.map((e: any, i: number) => (
-    <div key={i} className="p-4 bg-black/[0.02] rounded-2xl border border-black/5">
-      <div className="flex justify-between items-start mb-2 gap-3">
-        <div>
-          <span className="text-sm font-bold block">{e.judge_name}</span>
-          <span className="text-xs font-bold text-amber-600">
-            {calcJudgeScore(e).toFixed(1)}점
-          </span>
-        </div>
-
-        <button
-          type="button"
-          onClick={() => handleAdminDeleteEvaluation(e)}
-          disabled={isSavingEvaluation}
-          className="px-3 py-1.5 bg-red-50 text-red-600 border border-red-100 rounded-xl text-[11px] font-bold hover:bg-red-100 transition-all disabled:opacity-50"
-        >
-          이 평가만 삭제
-        </button>
-      </div>
-
-      <div className="grid grid-cols-2 gap-2 mb-3 text-[10px] text-black/40">
-        <span>텍스트: {e.text_grade}</span>
-        <span>작품1: {e.work1_grade}</span>
-        <span>작품2: {e.work2_grade}</span>
-        <span>작품3: {e.work3_grade}</span>
-      </div>
-
-      <p className="text-xs text-black/60 italic leading-relaxed">
-        "{e.comment || '의견 없음'}"
-      </p>
-    </div>
-  ))
-) : (
-  <p className="text-center py-8 text-black/20 text-sm">
-    아직 등록된 평가가 없습니다.
-  </p>
-)}
+                    {(selectedProposal.evaluations?.length ?? 0) > 0 ? (
+                      selectedProposal.evaluations.map((e: any, i: number) => (
+                        <div key={i} className="p-4 bg-black/[0.02] rounded-2xl border border-black/5">
+                          <div className="flex justify-between items-start mb-2 gap-3">
+                            <div>
+                              <span className="text-sm font-bold block">{e.judge_name}</span>
+                              <span className="text-xs font-bold text-amber-600">{calcJudgeScore(e).toFixed(1)}점</span>
+                            </div>
+                            <button type="button" onClick={() => handleAdminDeleteEvaluation(e)} disabled={isSavingEvaluation}
+                              className="px-3 py-1.5 bg-red-50 text-red-600 border border-red-100 rounded-xl text-[11px] font-bold hover:bg-red-100 transition-all disabled:opacity-50">
+                              이 평가만 삭제
+                            </button>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2 mb-3 text-[10px] text-black/40">
+                            <span>텍스트: {e.text_grade}</span>
+                            <span>작품1: {e.work1_grade}</span>
+                            <span>작품2: {e.work2_grade}</span>
+                            <span>작품3: {e.work3_grade}</span>
+                          </div>
+                          <p className="text-xs text-black/60 italic leading-relaxed">"{e.comment || '의견 없음'}"</p>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-center py-8 text-black/20 text-sm">아직 등록된 평가가 없습니다.</p>
+                    )}
                   </div>
                 </section>
               )}
@@ -1038,35 +1035,18 @@ if (entrySource === 'admin' && onBackToAdminStats) {
         </div>
 
         <div className="flex justify-between items-center pt-12 border-t border-black/5">
-          <button
-            onClick={handleBackFromDetail}
-            className="flex items-center gap-2 text-black/50 hover:text-black transition-colors"
-          >
+          <button onClick={handleBackFromDetail} className="flex items-center gap-2 text-black/50 hover:text-black transition-colors">
             <ArrowLeft size={20} /> 목록으로 돌아가기
           </button>
           <div className="flex gap-2">
             {prevStudent && (
-              <button
-                onClick={() => handleSelectStudent(prevStudent.id, 'prev')}
-                disabled={isLocked}
-                className="px-4 py-2 bg-white border border-black/10 rounded-xl text-xs font-bold hover:bg-black/5 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {isNavigating && navDirection === 'prev'
-                  ? <><SpinnerIcon /> 이동 중...</>
-                  : <><ArrowLeft size={14} /> 이전 학생</>
-                }
+              <button onClick={() => handleSelectStudent(prevStudent.id, 'prev')} disabled={isLocked} className="px-4 py-2 bg-white border border-black/10 rounded-xl text-xs font-bold hover:bg-black/5 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+                {isNavigating && navDirection === 'prev' ? <><SpinnerIcon /> 이동 중...</> : <><ArrowLeft size={14} /> 이전 학생</>}
               </button>
             )}
             {nextStudent && (
-              <button
-                onClick={() => handleSelectStudent(nextStudent.id, 'next')}
-                disabled={isLocked}
-                className="px-4 py-2 bg-black text-white rounded-xl text-xs font-bold hover:bg-black/90 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {isNavigating && navDirection === 'next'
-                  ? <><SpinnerIcon /> 이동 중...</>
-                  : <>다음 학생 <ChevronRight size={14} /></>
-                }
+              <button onClick={() => handleSelectStudent(nextStudent.id, 'next')} disabled={isLocked} className="px-4 py-2 bg-black text-white rounded-xl text-xs font-bold hover:bg-black/90 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+                {isNavigating && navDirection === 'next' ? <><SpinnerIcon /> 이동 중...</> : <>다음 학생 <ChevronRight size={14} /></>}
               </button>
             )}
           </div>
@@ -1074,61 +1054,21 @@ if (entrySource === 'admin' && onBackToAdminStats) {
 
         <AnimatePresence>
           {zoomImage && (
-            <div
-              className="fixed inset-0 bg-black/95 z-[100] flex flex-col items-center justify-center p-4 overflow-hidden"
-              onWheel={e => {
-                const delta = e.deltaY > 0 ? -0.2 : 0.2;
-                setZoomScale(prev => Math.min(5, Math.max(0.5, prev + delta)));
-              }}
-            >
+            <div className="fixed inset-0 bg-black/95 z-[100] flex flex-col items-center justify-center p-4 overflow-hidden"
+              onWheel={e => { const delta = e.deltaY > 0 ? -0.2 : 0.2; setZoomScale(prev => Math.min(5, Math.max(0.5, prev + delta))); }}>
               <div className="absolute top-8 right-8 flex gap-4 z-[110]">
                 <div className="flex bg-white/10 backdrop-blur-md rounded-xl p-1 border border-white/10">
-                  <button
-                    onClick={e => { e.stopPropagation(); setZoomScale(prev => Math.max(0.5, prev - 0.25)); }}
-                    className="w-10 h-10 flex items-center justify-center text-white hover:bg-white/10 rounded-lg transition-colors"
-                  >
-                    -
-                  </button>
-                  <div className="w-16 flex items-center justify-center text-white text-xs font-bold">
-                    {Math.round(zoomScale * 100)}%
-                  </div>
-                  <button
-                    onClick={e => { e.stopPropagation(); setZoomScale(prev => Math.min(5, prev + 0.25)); }}
-                    className="w-10 h-10 flex items-center justify-center text-white hover:bg-white/10 rounded-lg transition-colors"
-                  >
-                    +
-                  </button>
+                  <button onClick={e => { e.stopPropagation(); setZoomScale(prev => Math.max(0.5, prev - 0.25)); }} className="w-10 h-10 flex items-center justify-center text-white hover:bg-white/10 rounded-lg transition-colors">-</button>
+                  <div className="w-16 flex items-center justify-center text-white text-xs font-bold">{Math.round(zoomScale * 100)}%</div>
+                  <button onClick={e => { e.stopPropagation(); setZoomScale(prev => Math.min(5, prev + 0.25)); }} className="w-10 h-10 flex items-center justify-center text-white hover:bg-white/10 rounded-lg transition-colors">+</button>
                 </div>
-                <button
-                  className="px-6 py-2 bg-white text-black rounded-xl font-bold hover:bg-white/90 transition-all"
-                  onClick={() => { setZoomImage(null); setZoomScale(1); }}
-                >
-                  닫기
-                </button>
+                <button className="px-6 py-2 bg-white text-black rounded-xl font-bold hover:bg-white/90 transition-all" onClick={() => { setZoomImage(null); setZoomScale(1); }}>닫기</button>
               </div>
-
               <div className="w-full h-full flex items-center justify-center overflow-hidden">
-                <motion.img
-                  key={zoomImage}
-                  initial={{ opacity: 0, scale: 0.9 }}
-                  animate={{ opacity: 1, scale: zoomScale }}
-                  exit={{ opacity: 0, scale: 0.9 }}
-                  transition={{ type: 'spring', stiffness: 500, damping: 50 }}
-                  drag
-                  dragMomentum={false}
-                  dragElastic={0}
-                  dragTransition={{ power: 0, timeConstant: 0 }}
-                  src={zoomImage}
-                  alt="Zoomed"
-                  className="max-w-none shadow-2xl rounded-sm select-none cursor-grab active:cursor-grabbing"
-                  style={{
-                    transformOrigin: 'center center',
-                    width: 'auto',
-                    height: 'auto',
-                    maxWidth: '90%',
-                    maxHeight: '90%'
-                  }}
-                />
+                <motion.img key={zoomImage} initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: zoomScale }} exit={{ opacity: 0, scale: 0.9 }}
+                  transition={{ type: 'spring', stiffness: 500, damping: 50 }} drag dragMomentum={false} dragElastic={0} dragTransition={{ power: 0, timeConstant: 0 }}
+                  src={zoomImage} alt="Zoomed" className="max-w-none shadow-2xl rounded-sm select-none cursor-grab active:cursor-grabbing"
+                  style={{ transformOrigin: 'center center', width: 'auto', height: 'auto', maxWidth: '90%', maxHeight: '90%' }} />
               </div>
               <div className="absolute bottom-8 left-1/2 -translate-x-1/2 text-white/40 text-xs font-medium bg-black/20 backdrop-blur-sm px-4 py-2 rounded-full">
                 마우스 휠로 확대/축소, 드래그하여 이동
@@ -1140,6 +1080,7 @@ if (entrySource === 'admin' && onBackToAdminStats) {
     );
   }
 
+  // ── 목록 화면 ────────────────────────────────────────────────────
   return (
     <div className="space-y-8">
       <header className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
@@ -1147,39 +1088,42 @@ if (entrySource === 'admin' && onBackToAdminStats) {
           <h2 className="text-3xl font-bold tracking-tight">학생 기획안 심사</h2>
           <p className="text-black/50 mt-1">학생들의 기획안을 검토하고 점수를 부여하세요.</p>
         </div>
-        <div className="flex items-center gap-4 flex-wrap justify-end">
+        <div className="flex items-center gap-2 flex-wrap justify-end">
           <button
-  onClick={() => setShowPasswordModal(true)}
-  className="flex items-center gap-2 px-4 py-2 bg-white border border-black/10 rounded-xl text-xs font-bold hover:bg-black/5 transition-all"
->
-  <Key size={14} /> 비밀번호 변경
-</button>
+            onClick={() => setShowPasswordModal(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-white border border-black/10 rounded-xl text-xs font-bold hover:bg-black/5 transition-all h-9"
+          >
+            <Key size={14} /> 비밀번호 변경
+          </button>
+
+          {/* ── 일괄 인쇄 버튼 ── */}
+          <button
+            onClick={() => setShowBulkPrint(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-white border border-black/10 rounded-xl text-xs font-bold hover:bg-black/5 transition-all h-9"
+          >
+            <Printer size={14} /> 일괄 인쇄
+          </button>
+
           {rounds.some((r: any) => Number(r.is_open) === 1) && (
             <div className="text-[11px] font-bold px-3 py-1 rounded-full bg-emerald-100 text-emerald-700">
               현재 진행 차수: {rounds.find((r: any) => Number(r.is_open) === 1)?.round_number}차
             </div>
           )}
 
-            {user.role !== 'admin' && (
-  <button
-    onClick={() => setShowRanking(!showRanking)}
-    className={`px-4 py-2 rounded-xl text-xs font-bold transition-all border
-      ${showRanking
-        ? 'bg-black text-white border-black'
-        : 'bg-white text-black/40 border-black/10 hover:border-black/30'}`}
-  >
-    {showRanking ? '순위 숨기기' : '내 순위 보기'}
-  </button>
-)}
+          {user.role !== 'admin' && (
+            <button
+              onClick={() => setShowRanking(!showRanking)}
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all border h-9
+                ${showRanking ? 'bg-black text-white border-black' : 'bg-white text-black/40 border-black/10 hover:border-black/30'}`}
+            >
+              {showRanking ? '순위 숨기기' : '내 순위 보기'}
+            </button>
+          )}
 
-          <div className="flex gap-2 bg-black/5 p-1 rounded-xl">
+          <div className="flex gap-1 bg-black/5 p-1 rounded-xl">
             {[1, 2, 3].map(num => (
-              <button
-                key={num}
-                onClick={() => setSelectedRound(num)}
-                className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all
-                  ${selectedRound === num ? 'bg-white text-black shadow-sm' : 'text-black/40 hover:text-black'}`}
-              >
+              <button key={num} onClick={() => setSelectedRound(num)}
+                className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${selectedRound === num ? 'bg-white text-black shadow-sm' : 'text-black/40 hover:text-black'}`}>
                 {num}차 심사
               </button>
             ))}
@@ -1191,40 +1135,23 @@ if (entrySource === 'admin' && onBackToAdminStats) {
         <div className={`flex-1 grid grid-cols-1 md:grid-cols-2 ${showRanking ? 'lg:grid-cols-2' : 'lg:grid-cols-3'} gap-6`}>
           {students.map(student => {
             const myScore = calcMyScore(student);
-            const isMyEvaluationCompleted =
-              student.my_is_final === true ||
-              student.my_is_final === 1 ||
-              student.my_is_final === '1';
-
+            const isMyEvaluationCompleted = student.my_is_final === true || student.my_is_final === 1 || student.my_is_final === '1';
             return (
-              <motion.div
-                key={student.id}
-                id={`student-card-${student.id}`}
-                whileHover={{ y: -4 }}
+              <motion.div key={student.id} id={`student-card-${student.id}`} whileHover={{ y: -4 }}
                 className="bg-white p-6 rounded-3xl shadow-sm border border-black/5 flex flex-col justify-between group cursor-pointer"
-                onClick={() => handleSelectStudent(student.id)}
-              >
+                onClick={() => handleSelectStudent(student.id)}>
                 <div>
                   <div className="flex justify-between items-start mb-4">
-                    <div className="w-12 h-12 bg-black/5 rounded-2xl flex items-center justify-center text-black/20">
-                      <UserIcon size={24} />
-                    </div>
-                    <div className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest
-                      ${isMyEvaluationCompleted ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                    <div className="w-12 h-12 bg-black/5 rounded-2xl flex items-center justify-center text-black/20"><UserIcon size={24} /></div>
+                    <div className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest ${isMyEvaluationCompleted ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
                       {isMyEvaluationCompleted ? '심사 완료' : '심사 대기'}
                     </div>
                   </div>
                   <h3 className="text-xl font-bold mb-1 line-clamp-1">{student.title}</h3>
                   <p className="text-sm text-black/50 mb-4">{student.student_name} ({student.student_id})</p>
                   <div className="flex items-center gap-4 text-xs text-black/40">
-                    <span className="flex items-center gap-1">
-                      <MessageSquare size={14} /> {student.total_eval_count} 의견
-                    </span>
-                    {isMyEvaluationCompleted && (
-                      <span className="text-emerald-600 font-bold">
-                        내 점수: {myScore.toFixed(1)}
-                      </span>
-                    )}
+                    <span className="flex items-center gap-1"><MessageSquare size={14} /> {student.total_eval_count} 의견</span>
+                    {isMyEvaluationCompleted && <span className="text-emerald-600 font-bold">내 점수: {myScore.toFixed(1)}</span>}
                   </div>
                 </div>
                 <div className="mt-6 pt-4 border-t border-black/5 flex justify-between items-center">
@@ -1236,56 +1163,34 @@ if (entrySource === 'admin' && onBackToAdminStats) {
           })}
         </div>
 
-            {showRanking && user.role !== 'admin' && (
+        {showRanking && user.role !== 'admin' && (
           <aside className="w-full lg:w-80 space-y-6">
             <section className="bg-white p-6 rounded-3xl shadow-sm border border-black/5 sticky top-24">
               <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
                 <BarChart3 size={20} className="text-blue-600" /> 내 평가 순위
               </h3>
               <p className="text-[10px] text-black/40 mb-6 font-medium leading-relaxed">
-                본인이 부여한 점수만을 기준으로 산출된 실시간 순위입니다.
-                (다른 교수님의 점수는 반영되지 않습니다.)
+                본인이 부여한 점수만을 기준으로 산출된 실시간 순위입니다. (다른 교수님의 점수는 반영되지 않습니다.)
               </p>
               <div className="space-y-3">
-                {students
-                  .filter(s =>
-                    s.my_is_final === true ||
-                    s.my_is_final === 1 ||
-                    s.my_is_final === '1'
-                  )
+                {students.filter(s => s.my_is_final === true || s.my_is_final === 1 || s.my_is_final === '1')
                   .map(s => ({ ...s, myScore: calcMyScore(s) }))
                   .sort((a, b) => b.myScore - a.myScore)
                   .map((student, idx) => (
-                    <div
-                      key={student.id}
-                      onClick={() => handleSelectStudent(student.id)}
-                      className="flex items-center gap-3 p-3 rounded-2xl hover:bg-black/5 transition-all cursor-pointer group"
-                    >
-                      <div className={`w-6 h-6 rounded-lg flex items-center justify-center text-[10px] font-bold
-                        ${idx === 0 ? 'bg-amber-400 text-white'
-                          : idx === 1 ? 'bg-slate-300 text-white'
-                          : idx === 2 ? 'bg-orange-300 text-white'
-                          : 'bg-black/5 text-black/40'}`}>
+                    <div key={student.id} onClick={() => handleSelectStudent(student.id)}
+                      className="flex items-center gap-3 p-3 rounded-2xl hover:bg-black/5 transition-all cursor-pointer group">
+                      <div className={`w-6 h-6 rounded-lg flex items-center justify-center text-[10px] font-bold ${idx === 0 ? 'bg-amber-400 text-white' : idx === 1 ? 'bg-slate-300 text-white' : idx === 2 ? 'bg-orange-300 text-white' : 'bg-black/5 text-black/40'}`}>
                         {idx + 1}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <div className="text-xs font-bold text-black group-hover:text-blue-600 transition-colors truncate">
-                          {student.student_name}
-                        </div>
+                        <div className="text-xs font-bold text-black group-hover:text-blue-600 transition-colors truncate">{student.student_name}</div>
                         <div className="text-[10px] text-black/40 truncate">{student.title}</div>
                       </div>
                       <div className="text-xs font-bold text-black/80">{student.myScore.toFixed(1)}</div>
                     </div>
                   ))}
-
-                {students.filter(s =>
-                  s.my_is_final === true ||
-                  s.my_is_final === 1 ||
-                  s.my_is_final === '1'
-                ).length === 0 && (
-                  <div className="text-center py-12 text-black/20">
-                    <p className="text-xs font-medium">아직 평가한 학생이 없습니다.</p>
-                  </div>
+                {students.filter(s => s.my_is_final === true || s.my_is_final === 1 || s.my_is_final === '1').length === 0 && (
+                  <div className="text-center py-12 text-black/20"><p className="text-xs font-medium">아직 평가한 학생이 없습니다.</p></div>
                 )}
               </div>
             </section>
@@ -1293,67 +1198,42 @@ if (entrySource === 'admin' && onBackToAdminStats) {
         )}
       </div>
 
-            <AnimatePresence>
+      {/* ── 비밀번호 변경 모달 ── */}
+      <AnimatePresence>
         {showPasswordModal && (
           <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white rounded-3xl p-8 w-full max-w-md shadow-2xl"
-            >
-              <h3 className="text-xl font-bold mb-6 flex items-center gap-2">
-                <Key size={20} /> 비밀번호 변경
-              </h3>
-
+            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-3xl p-8 w-full max-w-md shadow-2xl">
+              <h3 className="text-xl font-bold mb-6 flex items-center gap-2"><Key size={20} /> 비밀번호 변경</h3>
               <form onSubmit={handlePasswordChange} className="space-y-4">
                 <div>
-                  <label className="block text-xs font-bold text-black/40 uppercase mb-2">
-                    새 비밀번호
-                  </label>
-                  <input
-                    type="password"
-                    value={passwords.new || ''}
-                    onChange={e => setPasswords({ ...passwords, new: e.target.value })}
-                    className="w-full px-4 py-2.5 rounded-xl border border-black/10 focus:ring-2 focus:ring-black/5 outline-none"
-                    required
-                  />
+                  <label className="block text-xs font-bold text-black/40 uppercase mb-2">새 비밀번호</label>
+                  <input type="password" value={passwords.new || ''} onChange={e => setPasswords({ ...passwords, new: e.target.value })} className="w-full px-4 py-2.5 rounded-xl border border-black/10 focus:ring-2 focus:ring-black/5 outline-none" required />
                 </div>
-
                 <div>
-                  <label className="block text-xs font-bold text-black/40 uppercase mb-2">
-                    새 비밀번호 확인
-                  </label>
-                  <input
-                    type="password"
-                    value={passwords.confirm || ''}
-                    onChange={e => setPasswords({ ...passwords, confirm: e.target.value })}
-                    className="w-full px-4 py-2.5 rounded-xl border border-black/10 focus:ring-2 focus:ring-black/5 outline-none"
-                    required
-                  />
+                  <label className="block text-xs font-bold text-black/40 uppercase mb-2">새 비밀번호 확인</label>
+                  <input type="password" value={passwords.confirm || ''} onChange={e => setPasswords({ ...passwords, confirm: e.target.value })} className="w-full px-4 py-2.5 rounded-xl border border-black/10 focus:ring-2 focus:ring-black/5 outline-none" required />
                 </div>
-
                 <div className="flex gap-2 pt-4">
-                  <button
-                    type="button"
-                    onClick={() => setShowPasswordModal(false)}
-                    className="flex-1 py-3 rounded-xl font-bold border border-black/10 hover:bg-black/5 transition-all"
-                  >
-                    취소
-                  </button>
-                  <button
-                    type="submit"
-                    className="flex-1 bg-black text-white py-3 rounded-xl font-bold hover:bg-black/90 transition-all"
-                  >
-                    변경하기
-                  </button>
+                  <button type="button" onClick={() => setShowPasswordModal(false)} className="flex-1 py-3 rounded-xl font-bold border border-black/10 hover:bg-black/5 transition-all">취소</button>
+                  <button type="submit" className="flex-1 bg-black text-white py-3 rounded-xl font-bold hover:bg-black/90 transition-all">변경하기</button>
                 </div>
               </form>
             </motion.div>
           </div>
         )}
       </AnimatePresence>
-      
+
+      {/* ── 일괄 인쇄 모달 ── */}
+      <AnimatePresence>
+        {showBulkPrint && (
+          <BulkPrintModal
+            students={students}
+            selectedRound={selectedRound}
+            onClose={() => setShowBulkPrint(false)}
+          />
+        )}
+      </AnimatePresence>
+
       {students.length === 0 && (
         <div className="text-center py-20 bg-white rounded-3xl border border-dashed border-black/10">
           <p className="text-black/30">아직 제출된 기획안이 없습니다.</p>
