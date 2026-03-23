@@ -8,7 +8,7 @@ import {
 
 interface JudgeDashboardProps {
   user: User;
-  forcedProposalId?: string | number | null;
+  forcedProposalId?: string | null;
   forcedRound?: number;
   entrySource?: 'admin' | 'judge-list';
   onBackToAdminStats?: () => void;
@@ -27,7 +27,7 @@ const EMPTY_EVALUATION = {
   work1_grade: '',
   work2_grade: '',
   work3_grade: '',
-  comment: ''
+  comment: '',
 };
 
 function calcJudgeScore(e: {
@@ -42,8 +42,9 @@ function calcJudgeScore(e: {
     GRADE_SCORES[e.work2_grade as keyof typeof GRADE_SCORES],
     GRADE_SCORES[e.work3_grade as keyof typeof GRADE_SCORES],
   ];
-  const valid = items.filter((s): s is number => typeof s === 'number' && s > 0);
-  return valid.length === 0 ? 0 : valid.reduce((a, b) => a + b, 0) / valid.length;
+  const valid = items.filter((s): s is number => typeof s === 'number' && s >= 0);
+  if (valid.length === 0) return 0;
+  return valid.reduce((a, b) => a + b, 0) / valid.length;
 }
 
 function calcMyScore(s: any): number {
@@ -57,7 +58,7 @@ function calcMyScore(s: any): number {
 
 function calculateAverage(evals: any[]): string {
   if (!evals || evals.length === 0) return '0.00';
-  const judgeScores = evals.map(calcJudgeScore).filter(score => score > 0);
+  const judgeScores = evals.map(calcJudgeScore).filter(score => score >= 0);
   if (judgeScores.length === 0) return '0.00';
   return (judgeScores.reduce((sum, score) => sum + score, 0) / judgeScores.length).toFixed(2);
 }
@@ -70,7 +71,7 @@ function parseDraft(raw: string): typeof EMPTY_EVALUATION | null {
       work1_grade: p.work1_grade || '',
       work2_grade: p.work2_grade || '',
       work3_grade: p.work3_grade || '',
-      comment: p.comment || ''
+      comment: p.comment || '',
     };
   } catch {
     return null;
@@ -86,11 +87,9 @@ function UserIcon({ size }: { size: number }) {
   );
 }
 
-// ── 일괄 인쇄용 단일 학생 카드 ─────────────────────────────────────
 function PrintProposalCard({ proposal, round }: { proposal: any; round: number }) {
   return (
     <div className="print-card" style={{ pageBreakAfter: 'always', padding: '32px', fontFamily: 'sans-serif' }}>
-      {/* 헤더 */}
       <div style={{ borderBottom: '2px solid #000', paddingBottom: '12px', marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
         <div>
           <div style={{ fontSize: '11px', color: '#666', marginBottom: '4px', letterSpacing: '0.05em' }}>
@@ -118,7 +117,6 @@ function PrintProposalCard({ proposal, round }: { proposal: any; round: number }
         </div>
       ) : (
         <>
-          {/* 텍스트 정보 */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', marginBottom: '24px' }}>
             <div style={{ display: 'grid', gap: '14px' }}>
               {[
@@ -149,7 +147,6 @@ function PrintProposalCard({ proposal, round }: { proposal: any; round: number }
             </div>
           </div>
 
-          {/* 작품별 상세 */}
           {(proposal.works || []).map((work: any, idx: number) => (
             <div key={idx} style={{ border: '1px solid #e5e7eb', borderRadius: '10px', overflow: 'hidden', marginBottom: '16px', pageBreakInside: 'avoid' }}>
               <div style={{ background: '#f9fafb', padding: '8px 16px', borderBottom: '1px solid #e5e7eb', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -184,7 +181,6 @@ function PrintProposalCard({ proposal, round }: { proposal: any; round: number }
             </div>
           ))}
 
-          {/* 심사 점수 요약 */}
           {proposal.evaluations && proposal.evaluations.length > 0 && (
             <div style={{ marginTop: '16px', border: '1px solid #e5e7eb', borderRadius: '10px', overflow: 'hidden', pageBreakInside: 'avoid' }}>
               <div style={{ background: '#f9fafb', padding: '8px 16px', borderBottom: '1px solid #e5e7eb', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -196,7 +192,6 @@ function PrintProposalCard({ proposal, round }: { proposal: any; round: number }
               <div style={{ padding: '12px 16px', display: 'grid', gridTemplateColumns: `repeat(${proposal.evaluations.length}, 1fr)`, gap: '10px' }}>
                 {proposal.evaluations.map((e: any, i: number) => (
                   <div key={i} style={{ background: '#f9fafb', borderRadius: '8px', padding: '10px 12px', border: '1px solid #e5e7eb' }}>
-                    {/* ✅ 교수 실명 대신 익명 레이블 사용 (인쇄 전용) */}
                     <div style={{ fontWeight: 700, fontSize: '12px', marginBottom: '4px' }}>교수{i + 1}</div>
                     <div style={{ fontSize: '13px', fontWeight: 900, color: '#d97706', marginBottom: '6px' }}>{calcJudgeScore(e).toFixed(1)}점</div>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2px', fontSize: '10px', color: '#888', marginBottom: '6px' }}>
@@ -216,7 +211,6 @@ function PrintProposalCard({ proposal, round }: { proposal: any; round: number }
             </div>
           )}
 
-          {/* 수기 심사 메모란 */}
           <div style={{ marginTop: '20px', border: '1px dashed #ccc', borderRadius: '10px', padding: '14px 16px', pageBreakInside: 'avoid' }}>
             <div style={{ fontSize: '10px', fontWeight: 700, color: '#aaa', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '10px' }}>심사 메모란</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '10px', marginBottom: '12px' }}>
@@ -236,7 +230,6 @@ function PrintProposalCard({ proposal, round }: { proposal: any; round: number }
   );
 }
 
-// ── 일괄 인쇄 모달 ──────────────────────────────────────────────────
 interface BulkPrintModalProps {
   students: any[];
   selectedRound: number;
@@ -255,7 +248,6 @@ function BulkPrintModal({ students, selectedRound, user, onClose }: BulkPrintMod
     ? students.filter(s => s.is_submitted)
     : students;
 
-  // ✅ cancelled 플래그를 useEffect 최상단에 선언, dependency에 filteredStudents.length 추가
   useEffect(() => {
     let cancelled = false;
 
@@ -272,8 +264,8 @@ function BulkPrintModal({ students, selectedRound, user, onClose }: BulkPrintMod
             const data = await res.json();
             results.push(data);
           }
-        } catch (err) {
-          console.error(`Failed to fetch proposal ${student.id}:`, err);
+        } catch {
+          // noop
         }
         if (!cancelled) setLoadedCount(prev => prev + 1);
       }
@@ -285,11 +277,9 @@ function BulkPrintModal({ students, selectedRound, user, onClose }: BulkPrintMod
     };
 
     fetchAll();
-    // ✅ 언마운트 또는 filterMode 변경 시 진행 중인 fetch 중단
     return () => { cancelled = true; };
-  }, [filterMode, filteredStudents.length]); // ✅ filteredStudents.length 추가
+  }, [filterMode, filteredStudents.length]);
 
-  // ✅ printRef.current null 체크 추가
   const handlePrint = () => {
     if (!printRef.current) return;
 
@@ -337,7 +327,6 @@ function BulkPrintModal({ students, selectedRound, user, onClose }: BulkPrintMod
         exit={{ opacity: 0, scale: 0.95, y: 20 }}
         className="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden"
       >
-        {/* 모달 헤더 */}
         <div className="p-8 border-b border-black/5">
           <div className="flex items-center gap-3 mb-1">
             <div className="w-10 h-10 bg-black text-white rounded-xl flex items-center justify-center">
@@ -350,7 +339,6 @@ function BulkPrintModal({ students, selectedRound, user, onClose }: BulkPrintMod
           </p>
         </div>
 
-        {/* 옵션 */}
         <div className="p-8 space-y-6">
           <div>
             <label className="block text-xs font-bold text-black/40 uppercase tracking-wider mb-3">출력 대상</label>
@@ -372,7 +360,6 @@ function BulkPrintModal({ students, selectedRound, user, onClose }: BulkPrintMod
             </div>
           </div>
 
-          {/* 로딩 진행 바 */}
           <div>
             <div className="flex justify-between items-center mb-2">
               <span className="text-xs font-bold text-black/40 uppercase tracking-wider">데이터 불러오는 중</span>
@@ -388,14 +375,13 @@ function BulkPrintModal({ students, selectedRound, user, onClose }: BulkPrintMod
                 animate={{
                   width: filteredStudents.length === 0
                     ? '100%'
-                    : `${(loadedCount / filteredStudents.length) * 100}%`
+                    : `${(loadedCount / filteredStudents.length) * 100}%`,
                 }}
                 transition={{ ease: 'easeOut', duration: 0.3 }}
               />
             </div>
           </div>
 
-          {/* 안내 */}
           <div className="bg-black/[0.03] rounded-2xl p-4 text-xs text-black/50 space-y-1.5 leading-relaxed">
             <p>• 각 학생의 기획안이 한 페이지씩 구분되어 출력됩니다.</p>
             <p>• 이미지가 포함된 경우 용량에 따라 출력 시간이 다소 걸릴 수 있습니다.</p>
@@ -404,7 +390,6 @@ function BulkPrintModal({ students, selectedRound, user, onClose }: BulkPrintMod
           </div>
         </div>
 
-        {/* 액션 버튼 */}
         <div className="px-8 pb-8 flex gap-3">
           <button
             onClick={onClose}
@@ -426,7 +411,6 @@ function BulkPrintModal({ students, selectedRound, user, onClose }: BulkPrintMod
         </div>
       </motion.div>
 
-      {/* 인쇄용 숨김 DOM */}
       <div ref={printRef} style={{ display: 'none' }}>
         {proposals.map((proposal, idx) => (
           <PrintProposalCard key={idx} proposal={proposal} round={selectedRound} />
@@ -436,13 +420,12 @@ function BulkPrintModal({ students, selectedRound, user, onClose }: BulkPrintMod
   );
 }
 
-// ── 메인 컴포넌트 ───────────────────────────────────────────────────
 export default function JudgeDashboard({
   user,
   forcedProposalId,
   forcedRound,
   entrySource = 'judge-list',
-  onBackToAdminStats
+  onBackToAdminStats,
 }: JudgeDashboardProps) {
   const [selectedRound, setSelectedRound] = useState(forcedRound || 1);
   const [students, setStudents] = useState<any[]>([]);
@@ -459,14 +442,14 @@ export default function JudgeDashboard({
   const [passwords, setPasswords] = useState({ current: '', new: '', confirm: '' });
   const [isEditing, setIsEditing] = useState(false);
   const [listScrollPos, setListScrollPos] = useState(0);
-  const [lastSelectedId, setLastSelectedId] = useState<string | number | null>(null);
+  const [lastSelectedId, setLastSelectedId] = useState<string | null>(null);
   const [rounds, setRounds] = useState<any[]>([]);
   const [previousProposal, setPreviousProposal] = useState<any | null>(null);
   const [showPreviousProposal, setShowPreviousProposal] = useState(true);
+
   const didSetInitialRound = useRef(false);
   const latestRequestId = useRef(0);
   const latestStudentsRequestId = useRef(0);
-  // ✅ fetchPreviousProposal race condition 방지용 ref
   const latestPrevRequestId = useRef(0);
 
   useEffect(() => {
@@ -548,8 +531,7 @@ export default function JudgeDashboard({
       } else {
         setRounds([]);
       }
-    } catch (err) {
-      console.error('Failed to fetch rounds:', err);
+    } catch {
       setRounds([]);
     }
   };
@@ -557,21 +539,19 @@ export default function JudgeDashboard({
   const fetchStudents = async () => {
     const requestId = ++latestStudentsRequestId.current;
     try {
-      const res = await fetch(`/api/students/${selectedRound}?judgeId=${user.id}`);
+      const res = await fetch(`/api/judge/students?roundNumber=${selectedRound}`);
       const data = await res.json();
       if (requestId !== latestStudentsRequestId.current) return;
       setStudents(Array.isArray(data) ? data : []);
       setPreviousProposal(null);
-    } catch (err) {
+    } catch {
       if (requestId !== latestStudentsRequestId.current) return;
-      console.error('Failed to fetch students:', err);
       setStudents([]);
       setPreviousProposal(null);
     }
   };
 
-  // ✅ latestPrevRequestId로 race condition 방지
-  const fetchPreviousProposal = async (userId: number | string) => {
+  const fetchPreviousProposal = async (userId: string) => {
     if (selectedRound <= 1) { setPreviousProposal(null); return; }
     const reqId = ++latestPrevRequestId.current;
     try {
@@ -580,14 +560,13 @@ export default function JudgeDashboard({
       const data = await res.json();
       if (reqId !== latestPrevRequestId.current) return;
       setPreviousProposal(data || null);
-    } catch (err) {
+    } catch {
       if (reqId !== latestPrevRequestId.current) return;
-      console.error('Failed to fetch previous proposal:', err);
       setPreviousProposal(null);
     }
   };
 
-  const handleSelectStudent = async (id: string | number, direction: 'prev' | 'next' | null = null) => {
+  const handleSelectStudent = async (id: string, direction: 'prev' | 'next' | null = null) => {
     if (!selectedProposal) setListScrollPos(window.scrollY);
     setLastSelectedId(id);
     setNavDirection(direction);
@@ -602,21 +581,27 @@ export default function JudgeDashboard({
       await fetchPreviousProposal((data as any).user_id);
       const myEval = data.evaluations?.find((e: any) => e.judge_id === user.id);
       if (myEval) {
-        setEvaluation({ text_grade: myEval.text_grade || '', work1_grade: myEval.work1_grade || '', work2_grade: myEval.work2_grade || '', work3_grade: myEval.work3_grade || '', comment: myEval.comment || '' });
+        setEvaluation({
+          text_grade: myEval.text_grade || '',
+          work1_grade: myEval.work1_grade || '',
+          work2_grade: myEval.work2_grade || '',
+          work3_grade: myEval.work3_grade || '',
+          comment: myEval.comment || '',
+        });
         setIsEditing(false);
       } else {
         const raw = localStorage.getItem(`eval_draft_${user.id}_${id}`);
         setEvaluation(raw ? (parseDraft(raw) ?? { ...EMPTY_EVALUATION }) : { ...EMPTY_EVALUATION });
         setIsEditing(true);
       }
-    } catch (err) {
-      console.error(err);
+    } catch {
+      // noop
     } finally {
       if (requestId === latestRequestId.current) { setIsNavigating(false); setNavDirection(null); }
     }
   };
 
-  const refreshCurrentProposal = async (proposalId: number | string) => {
+  const refreshCurrentProposal = async (proposalId: string) => {
     try {
       const res = await fetch(`/api/proposals/${proposalId}?judgeId=${user.id}&role=${user.role}`);
       if (!res.ok) return;
@@ -625,14 +610,20 @@ export default function JudgeDashboard({
       await fetchPreviousProposal((data as any).user_id);
       const myEval = data.evaluations?.find((e: any) => e.judge_id === user.id);
       if (myEval) {
-        setEvaluation({ text_grade: myEval.text_grade || '', work1_grade: myEval.work1_grade || '', work2_grade: myEval.work2_grade || '', work3_grade: myEval.work3_grade || '', comment: myEval.comment || '' });
+        setEvaluation({
+          text_grade: myEval.text_grade || '',
+          work1_grade: myEval.work1_grade || '',
+          work2_grade: myEval.work2_grade || '',
+          work3_grade: myEval.work3_grade || '',
+          comment: myEval.comment || '',
+        });
         setIsEditing(false);
       } else {
         setEvaluation({ ...EMPTY_EVALUATION });
         setIsEditing(true);
       }
-    } catch (err) {
-      console.error('refreshCurrentProposal failed:', err);
+    } catch {
+      // noop
     }
   };
 
@@ -661,9 +652,8 @@ export default function JudgeDashboard({
       }
       localStorage.removeItem(`eval_draft_${user.id}_${selectedProposal.id}`);
       setIsEditing(false);
-      await Promise.all([fetchStudents(), refreshCurrentProposal(selectedProposal.id)]);
-    } catch (err) {
-      console.error(err);
+      await Promise.all([fetchStudents(), refreshCurrentProposal(selectedProposal.id as string)]);
+    } catch {
       alert('네트워크 오류가 발생했습니다.');
     } finally {
       setIsSavingEvaluation(false);
@@ -674,14 +664,13 @@ export default function JudgeDashboard({
     if (!selectedProposal || !confirm('심사 내역을 삭제하시겠습니까?')) return;
     setIsSavingEvaluation(true);
     try {
-      const res = await fetch(`/api/evaluations/${selectedProposal.id}/${user.id}`, { method: 'DELETE' });
+      const res = await fetch(`/api/evaluations/${selectedProposal.id}`, { method: 'DELETE' });
       if (!res.ok) { alert('심사 삭제에 실패했습니다. 다시 시도해주세요.'); return; }
       alert('심사가 취소되었습니다.');
       localStorage.removeItem(`eval_draft_${user.id}_${selectedProposal.id}`);
       setEvaluation({ ...EMPTY_EVALUATION });
-      await Promise.all([fetchStudents(), refreshCurrentProposal(selectedProposal.id)]);
-    } catch (err) {
-      console.error(err);
+      await Promise.all([fetchStudents(), refreshCurrentProposal(selectedProposal.id as string)]);
+    } catch {
       alert('네트워크 오류가 발생했습니다.');
     } finally {
       setIsSavingEvaluation(false);
@@ -690,7 +679,9 @@ export default function JudgeDashboard({
 
   const handleAdminDeleteEvaluation = async (judgeEvaluation: any) => {
     if (!selectedProposal) return;
-    const ok = window.confirm(`${selectedProposal.name} 학생의 ${selectedRound}차 심사에서\n${judgeEvaluation.judge_name} 교수 평가를 삭제하시겠습니까?\n\n삭제 후 복구할 수 없습니다.`);
+    const ok = window.confirm(
+      `${(selectedProposal as any).name} 학생의 ${selectedRound}차 심사에서\n${judgeEvaluation.judge_name} 교수 평가를 삭제하시겠습니까?\n\n삭제 후 복구할 수 없습니다.`
+    );
     if (!ok) return;
     setIsSavingEvaluation(true);
     try {
@@ -698,9 +689,8 @@ export default function JudgeDashboard({
       const data = await res.json().catch(() => null);
       if (!res.ok) { alert(data?.error || '평가 삭제에 실패했습니다.'); return; }
       alert('해당 교수 평가가 삭제되었습니다.');
-      await Promise.all([fetchStudents(), refreshCurrentProposal(selectedProposal.id)]);
-    } catch (err) {
-      console.error(err);
+      await Promise.all([fetchStudents(), refreshCurrentProposal(selectedProposal.id as string)]);
+    } catch {
       alert('네트워크 오류가 발생했습니다.');
     } finally {
       setIsSavingEvaluation(false);
@@ -709,7 +699,9 @@ export default function JudgeDashboard({
 
   const handleAdminResetProposal = async () => {
     if (!selectedProposal) return;
-    const ok = window.confirm(`${selectedProposal.name} 학생의 ${selectedRound}차 제출안을 초기화하시겠습니까?\n\n작품, 이미지, 교수 평가가 함께 삭제되며 복구할 수 없습니다.`);
+    const ok = window.confirm(
+      `${(selectedProposal as any).name} 학생의 ${selectedRound}차 제출안을 초기화하시겠습니까?\n\n작품, 이미지, 교수 평가가 함께 삭제되며 복구할 수 없습니다.`
+    );
     if (!ok) return;
     setIsSavingEvaluation(true);
     try {
@@ -720,8 +712,7 @@ export default function JudgeDashboard({
       await fetchStudents();
       setPreviousProposal(null);
       if (entrySource === 'admin' && onBackToAdminStats) { onBackToAdminStats(); } else { setSelectedProposal(null); }
-    } catch (err) {
-      console.error(err);
+    } catch {
       alert('네트워크 오류가 발생했습니다.');
     } finally {
       setIsSavingEvaluation(false);
@@ -733,7 +724,6 @@ export default function JudgeDashboard({
     setSelectedProposal(null);
   };
 
-  // ✅ 함수 닫힘 괄호 확실히 추가 — 기존 코드에서 누락되어 하위 코드 전체가 함수 내부에 갇혀 있었음
   const handlePasswordChange = async (e: React.FormEvent) => {
     e.preventDefault();
     if (passwords.new !== passwords.confirm) { alert('새 비밀번호가 일치하지 않습니다.'); return; }
@@ -748,18 +738,16 @@ export default function JudgeDashboard({
         setShowPasswordModal(false);
         setPasswords({ current: '', new: '', confirm: '' });
       } else {
-        // ✅ 서버 오류 메시지 표시
         const errData = await res.json().catch(() => null);
         alert(errData?.error || '비밀번호 변경에 실패했습니다.');
       }
-    } catch (err) {
+    } catch {
       alert('비밀번호 변경에 실패했습니다.');
     }
-  }; // ✅ 여기서 handlePasswordChange 함수가 닫혀야 함
+  };
 
-  // ── 상세 화면 ────────────────────────────────────────────────────
   if (selectedProposal) {
-    const currentIndex = students.findIndex(s => s.id === selectedProposal.id);
+    const currentIndex = students.findIndex(s => String(s.id) === String(selectedProposal.id));
     const prevStudent = currentIndex > 0 ? students[currentIndex - 1] : null;
     const nextStudent = currentIndex < students.length - 1 ? students[currentIndex + 1] : null;
     const isLocked = isNavigating || isSavingEvaluation;
@@ -772,12 +760,14 @@ export default function JudgeDashboard({
           </button>
           <div className="flex gap-2">
             {prevStudent && (
-              <button onClick={() => handleSelectStudent(prevStudent.id, 'prev')} disabled={isLocked} className="px-4 py-2 bg-white border border-black/10 rounded-xl text-xs font-bold hover:bg-black/5 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+              <button onClick={() => handleSelectStudent(prevStudent.id, 'prev')} disabled={isLocked}
+                className="px-4 py-2 bg-white border border-black/10 rounded-xl text-xs font-bold hover:bg-black/5 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
                 {isNavigating && navDirection === 'prev' ? <><SpinnerIcon /> 이동 중...</> : <><ArrowLeft size={14} /> 이전 학생</>}
               </button>
             )}
             {nextStudent && (
-              <button onClick={() => handleSelectStudent(nextStudent.id, 'next')} disabled={isLocked} className="px-4 py-2 bg-white border border-black/10 rounded-xl text-xs font-bold hover:bg-black/5 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+              <button onClick={() => handleSelectStudent(nextStudent.id, 'next')} disabled={isLocked}
+                className="px-4 py-2 bg-white border border-black/10 rounded-xl text-xs font-bold hover:bg-black/5 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
                 {isNavigating && navDirection === 'next' ? <><SpinnerIcon /> 이동 중...</> : <>다음 학생 <ChevronRight size={14} /></>}
               </button>
             )}
@@ -787,13 +777,15 @@ export default function JudgeDashboard({
         <div className="space-y-8">
           {!selectedProposal.is_submitted ? (
             <section className="bg-white p-12 rounded-3xl shadow-sm border border-black/5 flex flex-col items-center justify-center text-center space-y-6">
-              <div className="w-20 h-20 bg-red-50 text-red-600 rounded-3xl flex items-center justify-center shadow-inner"><FileText size={40} /></div>
+              <div className="w-20 h-20 bg-red-50 text-red-600 rounded-3xl flex items-center justify-center shadow-inner">
+                <FileText size={40} />
+              </div>
               <div>
-                <h2 className="text-4xl font-black tracking-tight mb-4">{selectedProposal.name}</h2>
+                <h2 className="text-4xl font-black tracking-tight mb-4">{(selectedProposal as any).name}</h2>
                 <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2 text-sm font-bold">
-                  <span>학번: {selectedProposal.studentId || selectedProposal.student_id}</span>
+                  <span>학번: {selectedProposal.studentId || (selectedProposal as any).student_id}</span>
                   <span className="w-px h-3 bg-black/20" />
-                  <span>희망진로: {selectedProposal.careerPath || selectedProposal.career_path || '미입력'}</span>
+                  <span>희망진로: {selectedProposal.careerPath || (selectedProposal as any).career_path || '미입력'}</span>
                 </div>
               </div>
               <div className="bg-red-50/50 px-6 py-3 rounded-2xl border border-red-100">
@@ -804,15 +796,16 @@ export default function JudgeDashboard({
             <section className="bg-white p-8 rounded-3xl shadow-sm border border-black/5">
               <div className="flex justify-between items-start mb-8 border-b border-black/5 pb-6 gap-4">
                 <div>
-                  <h2 className="text-4xl font-black tracking-tight mb-4">{selectedProposal.name}</h2>
+                  <h2 className="text-4xl font-black tracking-tight mb-4">{(selectedProposal as any).name}</h2>
                   <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm font-bold">
-                    <span>학번: {selectedProposal.studentId || selectedProposal.student_id}</span>
+                    <span>학번: {selectedProposal.studentId || (selectedProposal as any).student_id}</span>
                     <span className="w-px h-3 bg-black/20" />
-                    <span>희망진로: {selectedProposal.careerPath || selectedProposal.career_path || '미입력'}</span>
+                    <span>희망진로: {selectedProposal.careerPath || (selectedProposal as any).career_path || '미입력'}</span>
                   </div>
                 </div>
                 {user.role === 'admin' && (
-                  <button type="button" onClick={handleAdminResetProposal} disabled={isSavingEvaluation} className="px-4 py-2 bg-red-50 text-red-700 border border-red-100 rounded-xl text-xs font-bold hover:bg-red-100 transition-all disabled:opacity-50">
+                  <button type="button" onClick={handleAdminResetProposal} disabled={isSavingEvaluation}
+                    className="px-4 py-2 bg-red-50 text-red-700 border border-red-100 rounded-xl text-xs font-bold hover:bg-red-100 transition-all disabled:opacity-50">
                     해당 차수 초기화
                   </button>
                 )}
@@ -850,7 +843,8 @@ export default function JudgeDashboard({
             <section className="bg-blue-50 border border-blue-100 rounded-3xl p-6">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-bold text-blue-800">{selectedRound - 1}차 제출안 참고</h3>
-                <button type="button" onClick={() => setShowPreviousProposal(v => !v)} className="px-3 py-1.5 bg-white border border-blue-100 rounded-xl text-xs font-bold hover:bg-blue-100 transition-all">
+                <button type="button" onClick={() => setShowPreviousProposal(v => !v)}
+                  className="px-3 py-1.5 bg-white border border-blue-100 rounded-xl text-xs font-bold hover:bg-blue-100 transition-all">
                   {showPreviousProposal ? '숨기기' : '보기'}
                 </button>
               </div>
@@ -913,7 +907,8 @@ export default function JudgeDashboard({
                         <div className="grid grid-cols-2 gap-4">
                           {work.images && work.images.length > 0 ? (
                             work.images.map((img: string, i: number) => (
-                              <div key={i} className="group relative aspect-video rounded-2xl overflow-hidden border border-black/5 cursor-zoom-in shadow-sm" onClick={() => { setZoomImage(img); setZoomScale(1); }}>
+                              <div key={i} className="group relative aspect-video rounded-2xl overflow-hidden border border-black/5 cursor-zoom-in shadow-sm"
+                                onClick={() => { setZoomImage(img); setZoomScale(1); }}>
                                 <img src={img} alt={`${work.title} ${i}`} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" loading="lazy" />
                                 <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
                                   <ExternalLink className="text-white opacity-0 group-hover:opacity-100 transition-opacity" size={24} />
@@ -948,7 +943,8 @@ export default function JudgeDashboard({
                         <label className="block text-xs font-bold text-black/40 uppercase mb-3">텍스트 선정 등급</label>
                         <div className="grid grid-cols-3 gap-1">
                           {Object.keys(GRADE_SCORES).map(g => (
-                            <button key={g} type="button" disabled={!isEditing} onClick={() => setEvaluation(prev => ({ ...prev, text_grade: g }))}
+                            <button key={g} type="button" disabled={!isEditing}
+                              onClick={() => setEvaluation(prev => ({ ...prev, text_grade: g }))}
                               className={`py-2 rounded-lg text-xs font-bold border transition-all ${evaluation.text_grade === g ? 'bg-black text-white border-black' : 'bg-white text-black/40 border-black/10 hover:border-black/30'} disabled:cursor-not-allowed`}>
                               {g}
                             </button>
@@ -960,7 +956,8 @@ export default function JudgeDashboard({
                           <label className="block text-xs font-bold text-black/40 uppercase mb-3">작품{num} 등급</label>
                           <div className="grid grid-cols-3 gap-1">
                             {Object.keys(GRADE_SCORES).map(g => (
-                              <button key={g} type="button" disabled={!isEditing} onClick={() => setWorkGrade(num, g)}
+                              <button key={g} type="button" disabled={!isEditing}
+                                onClick={() => setWorkGrade(num, g)}
                                 className={`py-2 rounded-lg text-xs font-bold border transition-all ${evaluation[`work${num}_grade` as keyof typeof evaluation] === g ? 'bg-black text-white border-black' : 'bg-white text-black/40 border-black/10 hover:border-black/30'} disabled:cursor-not-allowed`}>
                                 {g}
                               </button>
@@ -971,17 +968,20 @@ export default function JudgeDashboard({
                     </div>
                     <div className={!isEditing ? 'opacity-40' : ''}>
                       <label className="block text-xs font-bold text-black/40 uppercase mb-2">종합 심사평</label>
-                      <textarea value={evaluation.comment} disabled={!isEditing} onChange={e => setEvaluation(prev => ({ ...prev, comment: e.target.value }))}
+                      <textarea value={evaluation.comment} disabled={!isEditing}
+                        onChange={e => setEvaluation(prev => ({ ...prev, comment: e.target.value }))}
                         className="w-full px-4 py-3 rounded-xl border border-black/10 focus:ring-2 focus:ring-black/5 outline-none min-h-[120px] text-sm disabled:cursor-not-allowed"
                         placeholder="학생에게 전달될 구체적인 피드백을 작성해주세요. (선택 사항)" />
                     </div>
                     <div className="flex gap-3">
                       {!isEditing ? (
                         <div className="w-full flex gap-3">
-                          <button type="button" onClick={() => setIsEditing(true)} className="flex-1 bg-white text-black border border-black/10 py-4 rounded-xl font-bold hover:bg-black/5 transition-all flex items-center justify-center gap-2">
+                          <button type="button" onClick={() => setIsEditing(true)}
+                            className="flex-1 bg-white text-black border border-black/10 py-4 rounded-xl font-bold hover:bg-black/5 transition-all flex items-center justify-center gap-2">
                             <FileText size={18} /> 심사 수정 시작하기
                           </button>
-                          <button type="button" onClick={handleCancelEvaluation} disabled={isLocked} className="px-6 bg-red-50 text-red-500 border border-red-100 py-4 rounded-xl font-bold hover:bg-red-100 transition-all disabled:opacity-50">
+                          <button type="button" onClick={handleCancelEvaluation} disabled={isLocked}
+                            className="px-6 bg-red-50 text-red-500 border border-red-100 py-4 rounded-xl font-bold hover:bg-red-100 transition-all disabled:opacity-50">
                             삭제
                           </button>
                         </div>
@@ -990,7 +990,13 @@ export default function JudgeDashboard({
                           <button type="button" onClick={() => {
                             const myEval = selectedProposal.evaluations?.find((e: any) => e.judge_id === user.id);
                             if (myEval) {
-                              setEvaluation({ text_grade: myEval.text_grade || '', work1_grade: myEval.work1_grade || '', work2_grade: myEval.work2_grade || '', work3_grade: myEval.work3_grade || '', comment: myEval.comment || '' });
+                              setEvaluation({
+                                text_grade: myEval.text_grade || '',
+                                work1_grade: myEval.work1_grade || '',
+                                work2_grade: myEval.work2_grade || '',
+                                work3_grade: myEval.work3_grade || '',
+                                comment: myEval.comment || '',
+                              });
                               setIsEditing(false);
                             } else {
                               setSelectedProposal(null);
@@ -998,8 +1004,11 @@ export default function JudgeDashboard({
                           }} className="flex-1 bg-white text-black border border-black/10 py-4 rounded-xl font-bold hover:bg-black/5 transition-all">
                             취소
                           </button>
-                          <button type="submit" disabled={isSavingEvaluation} className="flex-[2] bg-black text-white py-4 rounded-xl font-bold hover:bg-black/90 transition-all disabled:opacity-50 shadow-lg shadow-black/10">
-                            {isSavingEvaluation ? <span className="flex items-center justify-center gap-2"><SpinnerIcon /> 저장 중...</span> : '심사 완료 및 저장'}
+                          <button type="submit" disabled={isSavingEvaluation}
+                            className="flex-[2] bg-black text-white py-4 rounded-xl font-bold hover:bg-black/90 transition-all disabled:opacity-50 shadow-lg shadow-black/10">
+                            {isSavingEvaluation
+                              ? <span className="flex items-center justify-center gap-2"><SpinnerIcon /> 저장 중...</span>
+                              : '심사 완료 및 저장'}
                           </button>
                         </>
                       )}
@@ -1018,11 +1027,13 @@ export default function JudgeDashboard({
                 <section className="bg-white p-8 rounded-3xl shadow-sm border border-black/5">
                   <h3 className="text-lg font-bold mb-6 flex items-center justify-between">
                     전체 교수진 평가
-                    <span className="text-xs bg-black text-white px-2 py-1 rounded-full">평균 {calculateAverage(selectedProposal.evaluations || [])}점</span>
+                    <span className="text-xs bg-black text-white px-2 py-1 rounded-full">
+                      평균 {calculateAverage(selectedProposal.evaluations || [])}점
+                    </span>
                   </h3>
                   <div className="space-y-4">
                     {(selectedProposal.evaluations?.length ?? 0) > 0 ? (
-                      selectedProposal.evaluations.map((e: any, i: number) => (
+                      selectedProposal.evaluations!.map((e: any, i: number) => (
                         <div key={i} className="p-4 bg-black/[0.02] rounded-2xl border border-black/5">
                           <div className="flex justify-between items-start mb-2 gap-3">
                             <div>
@@ -1059,12 +1070,14 @@ export default function JudgeDashboard({
           </button>
           <div className="flex gap-2">
             {prevStudent && (
-              <button onClick={() => handleSelectStudent(prevStudent.id, 'prev')} disabled={isLocked} className="px-4 py-2 bg-white border border-black/10 rounded-xl text-xs font-bold hover:bg-black/5 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+              <button onClick={() => handleSelectStudent(prevStudent.id, 'prev')} disabled={isLocked}
+                className="px-4 py-2 bg-white border border-black/10 rounded-xl text-xs font-bold hover:bg-black/5 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
                 {isNavigating && navDirection === 'prev' ? <><SpinnerIcon /> 이동 중...</> : <><ArrowLeft size={14} /> 이전 학생</>}
               </button>
             )}
             {nextStudent && (
-              <button onClick={() => handleSelectStudent(nextStudent.id, 'next')} disabled={isLocked} className="px-4 py-2 bg-black text-white rounded-xl text-xs font-bold hover:bg-black/90 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+              <button onClick={() => handleSelectStudent(nextStudent.id, 'next')} disabled={isLocked}
+                className="px-4 py-2 bg-black text-white rounded-xl text-xs font-bold hover:bg-black/90 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
                 {isNavigating && navDirection === 'next' ? <><SpinnerIcon /> 이동 중...</> : <>다음 학생 <ChevronRight size={14} /></>}
               </button>
             )}
@@ -1074,19 +1087,27 @@ export default function JudgeDashboard({
         <AnimatePresence>
           {zoomImage && (
             <div className="fixed inset-0 bg-black/95 z-[100] flex flex-col items-center justify-center p-4 overflow-hidden"
-              onWheel={e => { const delta = e.deltaY > 0 ? -0.2 : 0.2; setZoomScale(prev => Math.min(5, Math.max(0.5, prev + delta))); }}>
+              onWheel={e => {
+                const delta = e.deltaY > 0 ? -0.2 : 0.2;
+                setZoomScale(prev => Math.min(5, Math.max(0.5, prev + delta)));
+              }}>
               <div className="absolute top-8 right-8 flex gap-4 z-[110]">
                 <div className="flex bg-white/10 backdrop-blur-md rounded-xl p-1 border border-white/10">
-                  <button onClick={e => { e.stopPropagation(); setZoomScale(prev => Math.max(0.5, prev - 0.25)); }} className="w-10 h-10 flex items-center justify-center text-white hover:bg-white/10 rounded-lg transition-colors">-</button>
+                  <button onClick={e => { e.stopPropagation(); setZoomScale(prev => Math.max(0.5, prev - 0.25)); }}
+                    className="w-10 h-10 flex items-center justify-center text-white hover:bg-white/10 rounded-lg transition-colors">-</button>
                   <div className="w-16 flex items-center justify-center text-white text-xs font-bold">{Math.round(zoomScale * 100)}%</div>
-                  <button onClick={e => { e.stopPropagation(); setZoomScale(prev => Math.min(5, prev + 0.25)); }} className="w-10 h-10 flex items-center justify-center text-white hover:bg-white/10 rounded-lg transition-colors">+</button>
+                  <button onClick={e => { e.stopPropagation(); setZoomScale(prev => Math.min(5, prev + 0.25)); }}
+                    className="w-10 h-10 flex items-center justify-center text-white hover:bg-white/10 rounded-lg transition-colors">+</button>
                 </div>
-                <button className="px-6 py-2 bg-white text-black rounded-xl font-bold hover:bg-white/90 transition-all" onClick={() => { setZoomImage(null); setZoomScale(1); }}>닫기</button>
+                <button className="px-6 py-2 bg-white text-black rounded-xl font-bold hover:bg-white/90 transition-all"
+                  onClick={() => { setZoomImage(null); setZoomScale(1); }}>닫기</button>
               </div>
               <div className="w-full h-full flex items-center justify-center overflow-hidden">
-                <motion.img key={zoomImage} initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: zoomScale }} exit={{ opacity: 0, scale: 0.9 }}
-                  transition={{ type: 'spring', stiffness: 500, damping: 50 }} drag dragMomentum={false} dragElastic={0} dragTransition={{ power: 0, timeConstant: 0 }}
-                  src={zoomImage} alt="Zoomed" className="max-w-none shadow-2xl rounded-sm select-none cursor-grab active:cursor-grabbing"
+                <motion.img key={zoomImage} initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: zoomScale }}
+                  exit={{ opacity: 0, scale: 0.9 }} transition={{ type: 'spring', stiffness: 500, damping: 50 }}
+                  drag dragMomentum={false} dragElastic={0} dragTransition={{ power: 0, timeConstant: 0 }}
+                  src={zoomImage} alt="Zoomed"
+                  className="max-w-none shadow-2xl rounded-sm select-none cursor-grab active:cursor-grabbing"
                   style={{ transformOrigin: 'center center', width: 'auto', height: 'auto', maxWidth: '90%', maxHeight: '90%' }} />
               </div>
               <div className="absolute bottom-8 left-1/2 -translate-x-1/2 text-white/40 text-xs font-medium bg-black/20 backdrop-blur-sm px-4 py-2 rounded-full">
@@ -1099,7 +1120,6 @@ export default function JudgeDashboard({
     );
   }
 
-  // ── 목록 화면 ────────────────────────────────────────────────────
   return (
     <div className="space-y-8">
       <header className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
@@ -1108,22 +1128,16 @@ export default function JudgeDashboard({
           <p className="text-black/50 mt-1">학생들의 기획안을 검토하고 점수를 부여하세요.</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap justify-end">
-          {/* 비밀번호 변경 — 교수만 노출 */}
           {user.role !== 'admin' && (
-            <button
-              onClick={() => setShowPasswordModal(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-white border border-black/10 rounded-xl text-xs font-bold hover:bg-black/5 transition-all h-9"
-            >
+            <button onClick={() => setShowPasswordModal(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-white border border-black/10 rounded-xl text-xs font-bold hover:bg-black/5 transition-all h-9">
               <Key size={14} /> 비밀번호 변경
             </button>
           )}
 
-          {/* 일괄 인쇄 — 관리자만 노출 */}
           {user.role === 'admin' && (
-            <button
-              onClick={() => setShowBulkPrint(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-white border border-black/10 rounded-xl text-xs font-bold hover:bg-black/5 transition-all h-9"
-            >
+            <button onClick={() => setShowBulkPrint(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-white border border-black/10 rounded-xl text-xs font-bold hover:bg-black/5 transition-all h-9">
               <Printer size={14} /> 일괄 인쇄
             </button>
           )}
@@ -1135,11 +1149,8 @@ export default function JudgeDashboard({
           )}
 
           {user.role !== 'admin' && (
-            <button
-              onClick={() => setShowRanking(!showRanking)}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all border h-9
-                ${showRanking ? 'bg-black text-white border-black' : 'bg-white text-black/40 border-black/10 hover:border-black/30'}`}
-            >
+            <button onClick={() => setShowRanking(!showRanking)}
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all border h-9 ${showRanking ? 'bg-black text-white border-black' : 'bg-white text-black/40 border-black/10 hover:border-black/30'}`}>
               {showRanking ? '순위 숨기기' : '내 순위 보기'}
             </button>
           )}
@@ -1166,7 +1177,9 @@ export default function JudgeDashboard({
                 onClick={() => handleSelectStudent(student.id)}>
                 <div>
                   <div className="flex justify-between items-start mb-4">
-                    <div className="w-12 h-12 bg-black/5 rounded-2xl flex items-center justify-center text-black/20"><UserIcon size={24} /></div>
+                    <div className="w-12 h-12 bg-black/5 rounded-2xl flex items-center justify-center text-black/20">
+                      <UserIcon size={24} />
+                    </div>
                     <div className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest ${isMyEvaluationCompleted ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
                       {isMyEvaluationCompleted ? '심사 완료' : '심사 대기'}
                     </div>
@@ -1197,7 +1210,8 @@ export default function JudgeDashboard({
                 본인이 부여한 점수만을 기준으로 산출된 실시간 순위입니다. (다른 교수님의 점수는 반영되지 않습니다.)
               </p>
               <div className="space-y-3">
-                {students.filter(s => s.my_is_final === true || s.my_is_final === 1 || s.my_is_final === '1')
+                {students
+                  .filter(s => s.my_is_final === true || s.my_is_final === 1 || s.my_is_final === '1')
                   .map(s => ({ ...s, myScore: calcMyScore(s) }))
                   .sort((a, b) => b.myScore - a.myScore)
                   .map((student, idx) => (
@@ -1214,7 +1228,9 @@ export default function JudgeDashboard({
                     </div>
                   ))}
                 {students.filter(s => s.my_is_final === true || s.my_is_final === 1 || s.my_is_final === '1').length === 0 && (
-                  <div className="text-center py-12 text-black/20"><p className="text-xs font-medium">아직 평가한 학생이 없습니다.</p></div>
+                  <div className="text-center py-12 text-black/20">
+                    <p className="text-xs font-medium">아직 평가한 학생이 없습니다.</p>
+                  </div>
                 )}
               </div>
             </section>
@@ -1222,23 +1238,26 @@ export default function JudgeDashboard({
         )}
       </div>
 
-      {/* ── 비밀번호 변경 모달 — 교수만 사용 ── */}
       <AnimatePresence>
         {showPasswordModal && (
           <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-3xl p-8 w-full max-w-md shadow-2xl">
+            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-3xl p-8 w-full max-w-md shadow-2xl">
               <h3 className="text-xl font-bold mb-6 flex items-center gap-2"><Key size={20} /> 비밀번호 변경</h3>
               <form onSubmit={handlePasswordChange} className="space-y-4">
                 <div>
                   <label className="block text-xs font-bold text-black/40 uppercase mb-2">새 비밀번호</label>
-                  <input type="password" value={passwords.new || ''} onChange={e => setPasswords({ ...passwords, new: e.target.value })} className="w-full px-4 py-2.5 rounded-xl border border-black/10 focus:ring-2 focus:ring-black/5 outline-none" required />
+                  <input type="password" value={passwords.new || ''} onChange={e => setPasswords({ ...passwords, new: e.target.value })}
+                    className="w-full px-4 py-2.5 rounded-xl border border-black/10 focus:ring-2 focus:ring-black/5 outline-none" required />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-black/40 uppercase mb-2">새 비밀번호 확인</label>
-                  <input type="password" value={passwords.confirm || ''} onChange={e => setPasswords({ ...passwords, confirm: e.target.value })} className="w-full px-4 py-2.5 rounded-xl border border-black/10 focus:ring-2 focus:ring-black/5 outline-none" required />
+                  <input type="password" value={passwords.confirm || ''} onChange={e => setPasswords({ ...passwords, confirm: e.target.value })}
+                    className="w-full px-4 py-2.5 rounded-xl border border-black/10 focus:ring-2 focus:ring-black/5 outline-none" required />
                 </div>
                 <div className="flex gap-2 pt-4">
-                  <button type="button" onClick={() => setShowPasswordModal(false)} className="flex-1 py-3 rounded-xl font-bold border border-black/10 hover:bg-black/5 transition-all">취소</button>
+                  <button type="button" onClick={() => setShowPasswordModal(false)}
+                    className="flex-1 py-3 rounded-xl font-bold border border-black/10 hover:bg-black/5 transition-all">취소</button>
                   <button type="submit" className="flex-1 bg-black text-white py-3 rounded-xl font-bold hover:bg-black/90 transition-all">변경하기</button>
                 </div>
               </form>
@@ -1247,7 +1266,6 @@ export default function JudgeDashboard({
         )}
       </AnimatePresence>
 
-      {/* ── 일괄 인쇄 모달 — 관리자만 사용 ── */}
       <AnimatePresence>
         {showBulkPrint && (
           <BulkPrintModal
