@@ -62,10 +62,10 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
   }, []);
 
   useEffect(() => {
-  if (activeTab === 'stats' || activeTab === 'ordering') fetchStats();
-  if (activeTab === 'users') fetchUsers();
-  if (activeTab === 'rounds') fetchRounds();
-}, [activeTab, selectedRound]);
+    if (activeTab === 'stats' || activeTab === 'ordering') fetchStats();
+    if (activeTab === 'users') fetchUsers();
+    if (activeTab === 'rounds') fetchRounds();
+  }, [activeTab, selectedRound]);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -83,14 +83,11 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
 
   const fetchStats = async () => {
     const requestId = ++latestStatsRequestId.current;
-
     try {
       const res = await fetch(`/api/admin/stats/${selectedRound}`);
       if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
       const data = await res.json();
-
       if (requestId !== latestStatsRequestId.current) return;
-
       setStats(Array.isArray(data) ? data : []);
     } catch (err) {
       if (requestId !== latestStatsRequestId.current) return;
@@ -116,10 +113,8 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
       const res = await fetch('/api/admin/rounds');
       if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
       const data = await res.json();
-
       if (Array.isArray(data)) {
         setRounds(data);
-
         const activeRound = data.find((r: any) => Number(r.is_open) === 1);
         if (activeRound && !didSetInitialRound.current) {
           didSetInitialRound.current = true;
@@ -140,15 +135,10 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ roundNumber, isOpen }),
     });
-
     if (res.ok) {
-      if (isOpen) {
-        setSelectedRound(roundNumber);
-      }
+      if (isOpen) setSelectedRound(roundNumber);
       await fetchRounds();
-      if (activeTab === 'stats' || activeTab === 'ordering') {
-        await fetchStats();
-      }
+      if (activeTab === 'stats' || activeTab === 'ordering') await fetchStats();
     }
   };
 
@@ -211,40 +201,34 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
 
   const handleApplyManualOrders = async () => {
     if (!Array.isArray(stats)) return;
-
     const newOrders = stats.map(s => ({
       proposalId: s.id,
       userId: s.user_id,
       order: manualOrders[String(s.user_id)] || 0,
       isParticipating: !!s.is_participating
     }));
-
     await handleBulkOrderUpdate(newOrders);
     alert('발표 순서가 저장되었습니다.');
   };
 
   const handleApplyAutoOrder = async (mode: 'id_asc' | 'id_desc') => {
     if (!Array.isArray(stats)) return;
-
     const sorted = [...stats].sort((a, b) => {
       if (mode === 'id_asc') return (a.student_id || '').localeCompare(b.student_id || '');
       return (b.student_id || '').localeCompare(a.student_id || '');
     });
-
     const newOrders = sorted.map((s, idx) => ({
       proposalId: s.id,
       userId: s.user_id,
       order: idx + 1,
       isParticipating: !!s.is_participating
     }));
-
     await handleBulkOrderUpdate(newOrders);
     alert(`${mode === 'id_asc' ? '학번순' : '학번역순'}으로 순서가 재배정되었습니다.`);
   };
 
   const handleToggleAllParticipation = async (participate: boolean) => {
     if (!Array.isArray(stats)) return;
-
     showConfirm(
       participate ? '전체 발표 참여' : '전체 발표 제외',
       `모든 학생을 발표 ${participate ? '참여' : '제외'} 상태로 변경하시겠습니까?`,
@@ -269,7 +253,6 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
         try {
           const res = await fetch(`/api/admin/users/${userId}`, { method: 'DELETE' });
           const data = await res.json();
-
           if (res.ok) {
             alert('사용자가 성공적으로 삭제되었습니다.');
             fetchUsers();
@@ -291,18 +274,13 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
     try {
       const res = await fetch('/api/admin/backup');
       const data = await res.json();
-
       const wb = XLSX.utils.book_new();
-
       const proposalsWs = XLSX.utils.json_to_sheet(data.proposals);
       XLSX.utils.book_append_sheet(wb, proposalsWs, '기획안_전체');
-
       const evalsWs = XLSX.utils.json_to_sheet(data.evaluations);
       XLSX.utils.book_append_sheet(wb, evalsWs, '심사_전체');
-
       const usersWs = XLSX.utils.json_to_sheet(data.users);
       XLSX.utils.book_append_sheet(wb, usersWs, '사용자_전체');
-
       XLSX.writeFile(wb, `시스템_전체_백업_${new Date().toISOString().split('T')[0]}.xlsx`);
       alert('전체 백업 파일이 생성되었습니다.');
     } catch (err) {
@@ -340,7 +318,6 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
 
   const exportToExcel = () => {
     if (!Array.isArray(stats)) return;
-
     const data = stats.map(s => {
       const row: any = {
         '상태': s.is_submitted ? '최종 제출' : '작성 중',
@@ -353,7 +330,6 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
         '작품2 평균': s.avgWork2,
         '작품3 평균': s.avgWork3,
       };
-
       if (Array.isArray(s.evaluations)) {
         s.evaluations.forEach((e: any, idx: number) => {
           row[`교수${idx + 1} 총점`] = e.totalScore?.toFixed(2) || '0.00';
@@ -363,15 +339,12 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
           row[`교수${idx + 1} 작품3 점수`] = e.scores?.work3 || 0;
         });
       }
-
       const feedbacks = Array.isArray(s.evaluations)
         ? s.evaluations.map((e: any, idx: number) => `교수${idx + 1}: ${e.comment || '의견 없음'}`).join(' / ')
         : '';
-
       row['교수진 피드백'] = feedbacks;
       return row;
     });
-
     const ws = XLSX.utils.json_to_sheet(data);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, `${selectedRound}차 심사결과`);
@@ -381,31 +354,25 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
   const handleBulkUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
-
     const reader = new FileReader();
     reader.onload = (e) => {
       const buffer = e.target?.result as ArrayBuffer;
-
       const utf8Decoder = new TextDecoder('utf-8');
       let text = utf8Decoder.decode(buffer);
-
-      if (text.includes('�')) {
+      if (text.includes('?')) {
         const eucKrDecoder = new TextDecoder('euc-kr');
         text = eucKrDecoder.decode(buffer);
       }
-
       Papa.parse(text, {
         header: true,
         skipEmptyLines: true,
         complete: async (results) => {
           const data = results.data as any[];
           const validUsers = data.filter(u => u.role && u.username && u.name);
-
           if (validUsers.length === 0) {
             alert('유효한 사용자 데이터가 없습니다. CSV 형식을 확인해주세요. (필수: role, username, name)');
             return;
           }
-
           showConfirm(
             '일괄 등록 확인',
             `${validUsers.length}명의 사용자를 일괄 등록하시겠습니까?`,
@@ -434,7 +401,6 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
         }
       });
     };
-
     reader.readAsArrayBuffer(file);
     event.target.value = '';
   };
@@ -465,40 +431,23 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
     isParticipating?: boolean
   ) => {
     if (!Array.isArray(stats)) return;
-
     const updatedStats = stats.map(s => {
       if (s.id === proposalId && proposalId !== null) {
-        return {
-          ...s,
-          presentation_order: newOrder,
-          is_participating: isParticipating !== undefined ? isParticipating : s.is_participating
-        };
+        return { ...s, presentation_order: newOrder, is_participating: isParticipating !== undefined ? isParticipating : s.is_participating };
       }
       if (s.user_id === userId) {
-        return {
-          ...s,
-          presentation_order: newOrder,
-          is_participating: isParticipating !== undefined ? isParticipating : s.is_participating
-        };
+        return { ...s, presentation_order: newOrder, is_participating: isParticipating !== undefined ? isParticipating : s.is_participating };
       }
       return s;
     });
-
     setStats(updatedStats);
-
     try {
       const target = updatedStats.find(s => s.user_id === userId);
       await fetch('/api/admin/presentation-order', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          orders: [{
-            proposalId,
-            userId,
-            order: newOrder,
-            isParticipating: target?.is_participating,
-            roundNumber: selectedRound
-          }]
+          orders: [{ proposalId, userId, order: newOrder, isParticipating: target?.is_participating, roundNumber: selectedRound }]
         }),
       });
     } catch (err) {
@@ -513,13 +462,9 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
       const res = await fetch('/api/admin/presentation-order', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          orders: newOrders.map(o => ({ ...o, roundNumber: selectedRound }))
-        }),
+        body: JSON.stringify({ orders: newOrders.map(o => ({ ...o, roundNumber: selectedRound })) }),
       });
-      if (res.ok) {
-        fetchStats();
-      }
+      if (res.ok) fetchStats();
     } catch (err) {
       console.error(err);
     }
@@ -535,112 +480,96 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
           <RotateCcw size={18} />
           통계 목록으로 돌아가기
         </button>
-         <JudgeDashboard
-  user={user}
-  forcedProposalId={selectedStudentId}
-  entrySource="admin"
-  onBackToAdminStats={() => setSelectedStudentId(null)}
-/>
+        <JudgeDashboard
+          user={user}
+          forcedProposalId={selectedStudentId}
+          entrySource="admin"
+          onBackToAdminStats={() => setSelectedStudentId(null)}
+        />
       </div>
     );
   }
 
+  // ─── 공통 버튼 스타일 ────────────────────────────────────────────────────────
+  const btnBase = "flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all h-9";
+
   return (
     <div className="space-y-8">
-      <header className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
-        <div>
+      {/* ── HEADER ─────────────────────────────────────────────────────────── */}
+      <header className="flex flex-col gap-4">
+
+        {/* 1행: 타이틀 + 우측 액션 버튼들 */}
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <h2 className="text-3xl font-bold tracking-tight">관리자 대시보드</h2>
-          <div className="flex flex-wrap gap-4 mt-4">
+
+          {/* 우측 액션 버튼 그룹 — 높이·패딩 통일 */}
+          <div className="flex items-center gap-2 flex-wrap">
+            {activeTab === 'stats' && (
+              <button
+                onClick={exportToExcel}
+                className={`${btnBase} bg-emerald-600 text-white hover:bg-emerald-700 shadow-md shadow-emerald-600/20`}
+              >
+                <Download size={16} />
+                엑셀 다운로드
+              </button>
+            )}
+
+            {activeTab === 'stats' && (
+              <button
+                onClick={handleFullBackup}
+                className={`${btnBase} bg-black text-white hover:bg-black/90 shadow-md shadow-black/20`}
+              >
+                <Database size={16} />
+                전체 백업 (DB)
+              </button>
+            )}
+
+            {activeTab === 'stats' && (
+              <button
+                onClick={handleSeedData}
+                disabled={loading}
+                className={`${btnBase} bg-amber-50 text-amber-600 border border-amber-200 hover:bg-amber-100 disabled:opacity-50`}
+              >
+                <FlaskConical size={16} />
+                테스트 데이터 생성
+              </button>
+            )}
+
             <button
-  onClick={() => {
-    setActiveTab('stats');
-    setViewMode('stats');
-  }}
-              className={`px-4 py-2 rounded-xl text-sm font-bold transition-all ${activeTab === 'stats' ? 'bg-black text-white' : 'bg-white border border-black/10 text-black/40 hover:text-black'}`}
+              onClick={handleClearData}
+              className={`${btnBase} bg-red-50 text-red-600 border border-red-200 hover:bg-red-100`}
             >
-              심사 현황 및 통계
-            </button>
-            <button
-              onClick={() => setActiveTab('users')}
-              className={`px-4 py-2 rounded-xl text-sm font-bold transition-all ${activeTab === 'users' ? 'bg-black text-white' : 'bg-white border border-black/10 text-black/40 hover:text-black'}`}
-            >
-              사용자 관리
-            </button>
-            <button
-              onClick={() => setActiveTab('rounds')}
-              className={`px-4 py-2 rounded-xl text-sm font-bold transition-all ${activeTab === 'rounds' ? 'bg-black text-white' : 'bg-white border border-black/10 text-black/40 hover:text-black'}`}
-            >
-              심사 차수 관리
-            </button>
-            <button
-              onClick={() => setActiveTab('ordering')}
-              className={`px-4 py-2 rounded-xl text-sm font-bold transition-all ${activeTab === 'ordering' ? 'bg-black text-white' : 'bg-white border border-black/10 text-black/40 hover:text-black'}`}
-            >
-              발표 순서 관리
+              <Trash2 size={16} />
+              전체 데이터 초기화
             </button>
           </div>
         </div>
-       <div className="flex gap-2 flex-wrap items-center">
-          {/* 차수 선택 버튼 */}
-          {activeTab === 'stats' && (
-            <div className="flex gap-2 bg-black/5 p-1 rounded-xl mr-2">
-              {[1, 2, 3].map(num => (
-                <button
-                  key={num}
-                  onClick={() => setSelectedRound(num)}
-                  className={`px-5 py-2 rounded-lg text-sm font-bold transition-all
-                    ${selectedRound === num ? 'bg-white text-black shadow-sm' : 'text-black/40 hover:text-black'}`}
-                >
-                  {num}차 심사 보기
-                </button>
-              ))}
-            </div>
-          )}
 
-          {/* 엑셀 다운로드 */}
-          {activeTab === 'stats' && (
+        {/* 2행: 탭 메뉴 */}
+        <div className="flex flex-wrap gap-2">
+          {[
+            { key: 'stats',    label: '심사 현황 및 통계' },
+            { key: 'users',    label: '사용자 관리' },
+            { key: 'rounds',   label: '심사 차수 관리' },
+            { key: 'ordering', label: '발표 순서 관리' },
+          ].map(({ key, label }) => (
             <button
-              onClick={exportToExcel}
-              className="flex items-center gap-2 px-6 py-3 bg-emerald-600 text-white rounded-2xl font-bold hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-600/20"
+              key={key}
+              onClick={() => {
+                setActiveTab(key as any);
+                if (key === 'stats') setViewMode('stats');
+              }}
+              className={`px-4 py-2 rounded-xl text-sm font-bold transition-all h-9
+                ${activeTab === key
+                  ? 'bg-black text-white'
+                  : 'bg-white border border-black/10 text-black/40 hover:text-black'}`}
             >
-              <Download size={20} />
-              엑셀 다운로드
+              {label}
             </button>
-          )}
-
-          {/* 전체 백업 */}
-          {activeTab === 'stats' && (
-            <button
-              onClick={handleFullBackup}
-              className="flex items-center gap-2 px-6 py-3 bg-black text-white rounded-2xl font-bold hover:bg-black/90 transition-all shadow-lg shadow-black/20"
-            >
-              <Database size={20} />
-              전체 백업 (DB)
-            </button>
-          )}
-
-          {/* 테스트 데이터 생성 */}
-          {activeTab === 'stats' && (
-            <button
-              onClick={handleSeedData}
-              disabled={loading}
-              className="flex items-center gap-2 px-6 py-3 bg-amber-50 text-amber-600 rounded-2xl font-bold hover:bg-amber-100 transition-all border border-amber-100"
-            >
-              <FlaskConical size={20} />
-              테스트 데이터 생성
-            </button>
-          )}
-
-          {/* 데이터 초기화 */}
-          <button
-            onClick={handleClearData}
-            className="flex items-center gap-2 px-6 py-3 bg-red-50 text-red-600 rounded-2xl font-bold hover:bg-red-100 transition-all border border-red-100"
-          >
-            <Trash2 size={20} />
-            전체 데이터 초기화
-          </button>
+          ))}
         </div>
       </header>
+      {/* ── /HEADER ─────────────────────────────────────────────────────────── */}
 
       <AnimatePresence mode="wait">
         {activeTab === 'stats' ? (
@@ -653,44 +582,59 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
           >
             {viewMode === 'stats' ? (
               <>
+                {/* ── 현재 진행 차수 배지 + 차수 선택 버튼 (같은 행) ── */}
                 <div className="flex items-center gap-3 flex-wrap">
                   {rounds.some((r: any) => Number(r.is_open) === 1) && (
-                    <div className="text-[11px] font-bold px-3 py-1 rounded-full bg-emerald-100 text-emerald-700">
+                    <div className="text-[11px] font-bold px-3 py-1 rounded-full bg-emerald-100 text-emerald-700 whitespace-nowrap">
                       현재 진행 차수: {rounds.find((r: any) => Number(r.is_open) === 1)?.round_number}차
                     </div>
                   )}
+
+                  {/* 차수 선택 버튼 — 배지 바로 옆 */}
+                  <div className="flex gap-1 bg-black/5 p-1 rounded-xl">
+                    {[1, 2, 3].map(num => (
+                      <button
+                        key={num}
+                        onClick={() => setSelectedRound(num)}
+                        className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all
+                          ${selectedRound === num
+                            ? 'bg-white text-black shadow-sm'
+                            : 'text-black/40 hover:text-black'}`}
+                      >
+                        {num}차 심사 보기
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
-                <div className="flex justify-between items-center mb-6">
+                {/* ── 관리자 심사 현황 헤더 ── */}
+                <div className="flex justify-between items-center">
                   <h3 className="text-xl font-bold">관리자 심사 현황</h3>
-
                   <div className="flex gap-2">
                     <button
                       type="button"
                       onClick={() => setViewMode('stats')}
-                      className={`px-4 py-2 rounded-xl text-xs font-bold transition-all border ${
-                        viewMode === 'stats'
+                      className={`px-4 py-2 rounded-xl text-xs font-bold transition-all border h-9
+                        ${viewMode === 'stats'
                           ? 'bg-black text-white border-black'
-                          : 'bg-white text-black/40 border-black/10 hover:border-black/30'
-                      }`}
+                          : 'bg-white text-black/40 border-black/10 hover:border-black/30'}`}
                     >
                       통계 보기
                     </button>
-
                     <button
                       type="button"
                       onClick={() => setViewMode('judge-list')}
-                      className={`px-4 py-2 rounded-xl text-xs font-bold transition-all border ${
-                        viewMode === 'judge-list'
+                      className={`px-4 py-2 rounded-xl text-xs font-bold transition-all border h-9
+                        ${viewMode === 'judge-list'
                           ? 'bg-black text-white border-black'
-                          : 'bg-white text-black/40 border-black/10 hover:border-black/30'
-                      }`}
+                          : 'bg-white text-black/40 border-black/10 hover:border-black/30'}`}
                     >
                       심사 목록 보기
                     </button>
                   </div>
                 </div>
 
+                {/* 요약 카드 */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                   <div className="bg-white p-6 rounded-3xl shadow-sm border border-black/5">
                     <div className="flex items-center gap-4 mb-4">
@@ -736,6 +680,7 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
                   </div>
                 </div>
 
+                {/* 심사 테이블 */}
                 <section className="bg-white rounded-3xl shadow-sm border border-black/5 overflow-hidden">
                   <div className="p-6 border-b border-black/5 flex justify-between items-center">
                     <h3 className="text-lg font-bold">{selectedRound}차 심사 현황</h3>
@@ -781,7 +726,6 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
                                 <span className="text-[10px] bg-black/5 text-black/30 px-2 py-0.5 rounded-full font-bold">미참여</span>
                               )}
                             </td>
-
                             <td className="px-6 py-4">
                               {s.is_submitted ? (
                                 <span className="text-[10px] bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-bold">최종 제출</span>
@@ -789,9 +733,7 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
                                 <span className="text-[10px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-bold">작성 중</span>
                               )}
                             </td>
-
                             <td className="px-6 py-4 text-sm font-mono">{s.student_id}</td>
-
                             <td className="px-6 py-4 text-sm font-bold">
                               <button
                                 onClick={() => s.id && setSelectedStudentId(s.id)}
@@ -801,20 +743,16 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
                                 {s.name}
                               </button>
                             </td>
-
                             <td className="px-6 py-4 text-sm">{s.title}</td>
-
                             <td className="px-6 py-4">
                               <span className="px-3 py-1 bg-black text-white rounded-full font-bold text-xs">
                                 {s.averageScore}
                               </span>
                             </td>
-
                             <td className="px-6 py-4 text-sm font-medium text-black/60">{s.avgText}</td>
                             <td className="px-6 py-4 text-sm font-medium text-black/60">{s.avgWork1}</td>
                             <td className="px-6 py-4 text-sm font-medium text-black/60">{s.avgWork2}</td>
                             <td className="px-6 py-4 text-sm font-medium text-black/60">{s.avgWork3}</td>
-
                             <td className="px-6 py-4">
                               <div className="flex flex-wrap gap-2">
                                 {(s.evaluations || []).map((e: any, i: number) => (
@@ -851,8 +789,8 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
               <JudgeDashboard user={user} entrySource="judge-list" />
             )}
           </motion.div>
+
         ) : activeTab === 'users' ? (
-      
           <motion.div
             key="users"
             initial={{ opacity: 0, y: 10 }}
@@ -886,7 +824,6 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
                       </button>
                     </div>
                   </div>
-
                   <div>
                     <label className="block text-xs font-bold text-black/40 uppercase mb-2">아이디 (학번/성함)</label>
                     <input
@@ -898,7 +835,6 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
                       required
                     />
                   </div>
-
                   <div>
                     <label className="block text-xs font-bold text-black/40 uppercase mb-2">이름</label>
                     <input
@@ -910,7 +846,6 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
                       required
                     />
                   </div>
-
                   {newUser.role === 'student' && (
                     <div>
                       <label className="block text-xs font-bold text-black/40 uppercase mb-2">학번 확인</label>
@@ -924,7 +859,6 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
                       />
                     </div>
                   )}
-
                   <button
                     type="submit"
                     disabled={loading}
@@ -1036,7 +970,6 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
                     >
                       <ChevronLeft size={20} />
                     </button>
-
                     <div className="flex gap-1">
                       {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
                         <button
@@ -1048,7 +981,6 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
                         </button>
                       ))}
                     </div>
-
                     <button
                       onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
                       disabled={currentPage === totalPages}
@@ -1061,6 +993,7 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
               </section>
             </div>
           </motion.div>
+
         ) : activeTab === 'ordering' ? (
           <motion.div
             key="ordering"
@@ -1076,7 +1009,6 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
                     현재 진행 차수: {rounds.find((r: any) => Number(r.is_open) === 1)?.round_number}차
                   </div>
                 )}
-
                 <div className="flex gap-2 bg-black/5 p-1.5 rounded-2xl w-fit">
                   {[1, 2, 3].map(num => (
                     <button
@@ -1105,17 +1037,13 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
                     전체 제외
                   </button>
                 </div>
-
                 <div className="h-6 w-px bg-black/10" />
-
                 <select
                   value={orderingMode}
                   onChange={(e) => {
                     const mode = e.target.value as 'id_asc' | 'id_desc' | 'manual';
                     setOrderingMode(mode);
-                    if (mode === 'id_asc' || mode === 'id_desc') {
-                      handleApplyAutoOrder(mode);
-                    }
+                    if (mode === 'id_asc' || mode === 'id_desc') handleApplyAutoOrder(mode);
                   }}
                   className="px-4 py-2 bg-white border border-black/10 rounded-xl text-xs font-bold outline-none"
                 >
@@ -1123,7 +1051,6 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
                   <option value="id_desc">학번역순 정렬</option>
                   <option value="manual">관리자 수동 설정</option>
                 </select>
-
                 {orderingMode === 'manual' && (
                   <button
                     onClick={handleApplyManualOrders}
@@ -1217,6 +1144,7 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
               </div>
             </section>
           </motion.div>
+
         ) : activeTab === 'rounds' ? (
           <motion.div
             key="rounds"
@@ -1228,7 +1156,6 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
             <section className="bg-white p-8 rounded-3xl shadow-sm border border-black/5">
               <h3 className="text-xl font-bold mb-6">심사 차수 활성화 설정</h3>
               <p className="text-sm text-black/50 mb-8">관리자가 활성화한 차수만 학생이 기획안을 제출하거나 수정할 수 있습니다.</p>
-
               <div className="space-y-4">
                 {Array.isArray(rounds) && rounds.map(r => (
                   <div key={r.round_number} className="flex items-center justify-between p-6 bg-black/[0.02] rounded-2xl border border-black/5">
@@ -1250,6 +1177,7 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
         ) : null}
       </AnimatePresence>
 
+      {/* ── Confirm Modal ─────────────────────────────────────────────────── */}
       <AnimatePresence>
         {confirmModal.isOpen && (
           <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 overflow-y-auto">
@@ -1271,9 +1199,7 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
                   {confirmModal.isDanger ? <Trash2 size={32} /> : <ShieldCheck size={32} />}
                 </div>
                 <h4 className="text-2xl font-bold mb-3">{confirmModal.title}</h4>
-                <p className="text-black/50 text-sm leading-relaxed mb-10">
-                  {confirmModal.message}
-                </p>
+                <p className="text-black/50 text-sm leading-relaxed mb-10">{confirmModal.message}</p>
                 <div className="flex gap-3">
                   <button
                     onClick={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
