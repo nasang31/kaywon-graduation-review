@@ -9,6 +9,7 @@ import {
 interface JudgeDashboardProps {
   user: User;
   forcedProposalId?: string | number | null;
+  forcedRound?: number;
   entrySource?: 'admin' | 'judge-list';
   onBackToAdminStats?: () => void;
 }
@@ -120,10 +121,11 @@ function UserIcon({ size }: { size: number }) {
 export default function JudgeDashboard({
   user,
   forcedProposalId,
+  forcedRound,
   entrySource = 'judge-list',
   onBackToAdminStats
 }: JudgeDashboardProps) {
-  const [selectedRound, setSelectedRound] = useState(1);
+  const [selectedRound, setSelectedRound] = useState(forcedRound || 1);
   const [students, setStudents] = useState<any[]>([]);
   const [selectedProposal, setSelectedProposal] = useState<Proposal | null>(null);
   const [zoomImage, setZoomImage] = useState<string | null>(null);
@@ -146,7 +148,13 @@ export default function JudgeDashboard({
 
   const latestRequestId = useRef(0);
   const latestStudentsRequestId = useRef(0);
-  
+
+  useEffect(() => {
+    if (forcedRound) {
+      setSelectedRound(forcedRound);
+    }
+  }, [forcedRound]);
+
   const setWorkGrade = (num: 1 | 2 | 3, grade: string) => {
     setEvaluation(prev => ({
       ...prev,
@@ -214,10 +222,10 @@ export default function JudgeDashboard({
   }, []);
 
   useEffect(() => {
-  setSelectedProposal(null);
-  setPreviousProposal(null);
-  fetchStudents();
-}, [selectedRound]);
+    setSelectedProposal(null);
+    setPreviousProposal(null);
+    fetchStudents();
+  }, [selectedRound]);
 
   useEffect(() => {
     if (forcedProposalId) handleSelectStudent(forcedProposalId);
@@ -243,7 +251,10 @@ export default function JudgeDashboard({
         const activeRound = data.find((r: any) => Number(r.is_open) === 1);
         if (activeRound && !didSetInitialRound.current) {
           didSetInitialRound.current = true;
-          setSelectedRound(activeRound.round_number);
+          
+          if (!forcedRound) {
+            setSelectedRound(activeRound.round_number);
+          }
         }
       } else {
         setRounds([]);
