@@ -758,7 +758,7 @@ if (entrySource === 'admin' && onBackToAdminStats) {
   </section>
 )}
 
-          {selectedProposal.is_submitted && (
+          {Number(selectedProposal.is_submitted) === 1 && (
             <div className="space-y-8">
               <h3 className="text-2xl font-bold px-4">작품별 상세 내용</h3>
               {selectedProposal.works?.map((work, idx) => {
