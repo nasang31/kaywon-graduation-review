@@ -43,8 +43,20 @@ export default function StudentDashboard({ user }: StudentDashboardProps) {
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastAutoSave, setLastAutoSave] = useState<Date | null>(null);
+
+  // ── 🔴 수정: 클로저 문제 해결을 위해 최신 proposal을 ref로 관리 ──
+  const proposalRef = useRef(proposal);
+  useEffect(() => {
+    proposalRef.current = proposal;
+  }, [proposal]);
+
+  // ── 🔴 수정: interval ref를 명확히 관리 ──
   const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const isInitialMount = useRef(true);
+
+  // ── 🔴 수정: 경쟁 조건 방지용 request ID ──
+  const latestProposalRequestId = useRef(0);
+  const latestPrevProposalRequestId = useRef(0);
+
   const [showConfirmModal, setShowConfirmModal] = useState<{
     show: boolean;
     title: string;
@@ -61,70 +73,78 @@ export default function StudentDashboard({ user }: StudentDashboardProps) {
   const currentRoundInfo = rounds.find(r => r.round_number === selectedRound);
   const isLocked = proposal.is_submitted || !currentRoundInfo?.is_open;
   const canToggleSubmit = !!currentRoundInfo?.is_open;
-  
+
   useEffect(() => {
     fetchRounds();
   }, []);
 
+  // ── 🔴 수정: isInitialMount 제거 (아무 역할도 하지 않았음) ──
   useEffect(() => {
-    if (isInitialMount.current) {
-      isInitialMount.current = false;
-    }
-     fetchProposal();
-  fetchPreviousProposal();
-}, [user.id, selectedRound]);
-  
+    fetchProposal();
+    fetchPreviousProposal();
+  }, [user.id, selectedRound]);
+
   // Auto-save to localStorage
   useEffect(() => {
     if (fetching || !proposal.userId) return;
-    
-    // Only save if we have a base proposal or are actively editing
     localStorage.setItem(`proposal_draft_${user.id}_${selectedRound}`, JSON.stringify(proposal));
   }, [proposal, user.id, selectedRound, fetching]);
 
-  // Periodic auto-save to Server (every 2 minutes)
+  // ── 🔴 수정: setInterval 중복 실행 방지
+  //    - proposalRef로 최신 값 참조 (클로저 문제 해결)
+  //    - isLocked/fetching 변경 시 interval 재생성하지 않고
+  //      콜백 내부에서 ref로 최신 상태 직접 확인 ──
   useEffect(() => {
-    if (isLocked || fetching) return;
+    if (autoSaveTimerRef.current) {
+      clearInterval(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = null;
+    }
 
     autoSaveTimerRef.current = setInterval(() => {
-      if (!proposal.is_submitted && !proposal.is_evaluated && !fetching) {
+      const current = proposalRef.current;
+      const locked = current.is_submitted || !currentRoundInfo?.is_open;
+      if (!locked && !current.is_submitted && !current.is_evaluated) {
         executeSubmit();
         setLastAutoSave(new Date());
       }
     }, 120000);
 
     return () => {
-      if (autoSaveTimerRef.current) clearInterval(autoSaveTimerRef.current);
+      if (autoSaveTimerRef.current) {
+        clearInterval(autoSaveTimerRef.current);
+        autoSaveTimerRef.current = null;
+      }
     };
-  }, [proposal, isLocked, fetching]);
+  }, [currentRoundInfo]); // currentRoundInfo가 바뀔 때만 재생성
 
   const fetchRounds = async () => {
-  try {
-    const res = await fetch('/api/admin/rounds');
-    const data = await res.json();
+    try {
+      const res = await fetch('/api/admin/rounds');
+      const data = await res.json();
 
-    if (Array.isArray(data)) {
-      setRounds(data);
-
-      const activeRound = data.find((r: any) => Number(r.is_open) === 1);
-
-      if (activeRound && !didSetInitialRound.current) {
-        didSetInitialRound.current = true;
-        setSelectedRound(activeRound.round_number);
+      if (Array.isArray(data)) {
+        setRounds(data);
+        const activeRound = data.find((r: any) => Number(r.is_open) === 1);
+        if (activeRound && !didSetInitialRound.current) {
+          didSetInitialRound.current = true;
+          setSelectedRound(activeRound.round_number);
+        }
+      } else {
+        console.error('Rounds data is not an array:', data);
+        setRounds([]);
       }
-    } else {
-      console.error('Rounds data is not an array:', data);
+    } catch (err) {
+      console.error('Failed to fetch rounds:', err);
       setRounds([]);
     }
-  } catch (err) {
-    console.error('Failed to fetch rounds:', err);
-    setRounds([]);
-  }
-};
+  };
 
   const fetchProposal = async () => {
+    // ── 🔴 수정: 경쟁 조건 방지 — 최신 요청만 반영 ──
+    const requestId = ++latestProposalRequestId.current;
+
     setFetching(true);
-    // Reset state first to avoid showing old round data
+
     const defaultProposal = {
       userId: user.id,
       roundNumber: selectedRound,
@@ -149,9 +169,11 @@ export default function StudentDashboard({ user }: StudentDashboardProps) {
     try {
       const res = await fetch(`/api/proposals/my/${user.id}/${selectedRound}`);
       const data = await res.json();
-      
+
+      // 오래된 요청이면 무시
+      if (requestId !== latestProposalRequestId.current) return;
+
       if (data && data.id) {
-        // Ensure we always have 3 works, even if some are missing in DB
         const works: Work[] = [
           { workNumber: 1, title: '', category: '공간설계' as const, summary: '', keywords: '', purpose: '', effect: '', images: [] },
           { workNumber: 2, title: '', category: '공간설계' as const, summary: '', keywords: '', purpose: '', effect: '', images: [] },
@@ -195,12 +217,12 @@ export default function StudentDashboard({ user }: StudentDashboardProps) {
           works
         });
       } else {
-        // If no server data, check localStorage for this specific round
+        if (requestId !== latestProposalRequestId.current) return;
+
         const savedData = localStorage.getItem(`proposal_draft_${user.id}_${selectedRound}`);
         if (savedData) {
           try {
             const parsed = JSON.parse(savedData);
-            // Ensure we don't accidentally load a draft from another round if the key was somehow wrong
             if (parsed.roundNumber === selectedRound) {
               setProposal(prev => ({ ...prev, ...parsed }));
             }
@@ -210,25 +232,45 @@ export default function StudentDashboard({ user }: StudentDashboardProps) {
         }
       }
     } catch (err) {
+      if (requestId !== latestProposalRequestId.current) return;
       console.error('Failed to fetch proposal', err);
     } finally {
-      setFetching(false);
+      if (requestId === latestProposalRequestId.current) {
+        setFetching(false);
+      }
+    }
+  };
+
+  const fetchPreviousProposal = async () => {
+    // ── 🔴 수정: 경쟁 조건 방지 ──
+    const requestId = ++latestPrevProposalRequestId.current;
+
+    if (selectedRound <= 1) {
+      setPreviousProposal(null);
+      return;
+    }
+
+    try {
+      const res = await fetch(`/api/proposals/reference/${user.id}/${selectedRound - 1}`);
+      const data = await res.json();
+
+      if (requestId !== latestPrevProposalRequestId.current) return;
+      setPreviousProposal(data || null);
+    } catch (err) {
+      if (requestId !== latestPrevProposalRequestId.current) return;
+      console.error('Failed to fetch previous proposal', err);
+      setPreviousProposal(null);
     }
   };
 
   const handleImageUpload = async (index: number, file: File) => {
     if (isLocked) return;
-    
+
     console.log('[UPLOAD] Starting upload for index:', index, 'file:', file.name, 'size:', file.size);
     setUploading(index);
     try {
-      // Client-side compression
-      const options = {
-        maxSizeMB: 1,
-        maxWidthOrHeight: 1920,
-        useWebWorker: true
-      };
-      
+      const options = { maxSizeMB: 1, maxWidthOrHeight: 1920, useWebWorker: true };
+
       console.log('[UPLOAD] Compressing image...');
       let compressedFile;
       try {
@@ -236,11 +278,10 @@ export default function StudentDashboard({ user }: StudentDashboardProps) {
         console.log('[UPLOAD] Compression complete. New size:', compressedFile.size);
       } catch (compressErr) {
         console.error('[UPLOAD] Compression failed:', compressErr);
-        compressedFile = file; // Fallback to original file if compression fails
+        compressedFile = file;
       }
-      
+
       const formData = new FormData();
-      // Preserve original filename
       formData.append('image', compressedFile, file.name);
 
       console.log('[UPLOAD] Sending fetch request to /api/upload');
@@ -282,7 +323,7 @@ export default function StudentDashboard({ user }: StudentDashboardProps) {
   const handleSubmit = async (e?: React.FormEvent, forceSubmit?: boolean) => {
     if (e) e.preventDefault();
     if (!currentRoundInfo?.is_open) return;
-    
+
     if (forceSubmit === true) {
       setShowConfirmModal({
         show: true,
@@ -293,7 +334,7 @@ export default function StudentDashboard({ user }: StudentDashboardProps) {
       });
       return;
     }
-    
+
     if (forceSubmit === false) {
       setShowConfirmModal({
         show: true,
@@ -312,24 +353,26 @@ export default function StudentDashboard({ user }: StudentDashboardProps) {
     setLoading(true);
     setError(null);
     setShowConfirmModal(prev => ({ ...prev, show: false }));
-    
+
     try {
-      const payload = { 
-        ...proposal, 
+      // ── 🔴 수정: autoSave 호출 시 proposalRef.current 사용으로
+      //    항상 최신 값이 서버에 전송됨 ──
+      const currentProposal = proposalRef.current;
+      const payload = {
+        ...currentProposal,
         roundNumber: selectedRound,
-        is_submitted: forceSubmit !== undefined ? forceSubmit : !!proposal.is_submitted 
+        is_submitted: forceSubmit !== undefined ? forceSubmit : !!currentProposal.is_submitted
       };
-      
+
       const response = await fetch('/api/proposals', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      
+
       if (response.ok) {
         setSuccess(true);
         setTimeout(() => setSuccess(false), 3000);
-        // Clear localStorage on successful manual submit
         localStorage.removeItem(`proposal_draft_${user.id}_${selectedRound}`);
         await fetchProposal();
       } else {
@@ -351,185 +394,174 @@ export default function StudentDashboard({ user }: StudentDashboardProps) {
     setProposal({ ...proposal, works: newWorks });
   };
 
-  const fetchPreviousProposal = async () => {
-  if (selectedRound <= 1) {
-    setPreviousProposal(null);
-    return;
-  }
+  const handleCopyFromPrevious = () => {
+    if (!previousProposal || isLocked) return;
 
-  try {
-    const res = await fetch(`/api/proposals/reference/${user.id}/${selectedRound - 1}`);
-    const data = await res.json();
-    setPreviousProposal(data || null);
-  } catch (err) {
-    console.error('Failed to fetch previous proposal', err);
-    setPreviousProposal(null);
-  }
-};
+    setShowConfirmModal({
+      show: true,
+      title: `${selectedRound - 1}차 내용 불러오기`,
+      message: `${selectedRound - 1}차 내용을 현재 ${selectedRound}차 작성란에 복사합니다. 현재 작성 중인 내용은 덮어써집니다.`,
+      onConfirm: () => {
+        const copiedWorks: Work[] = [1, 2, 3].map((num) => {
+          const found = previousProposal.works?.find((w: any) => Number(w.work_number ?? w.workNumber) === num);
+          return {
+            workNumber: num,
+            title: found?.title || '',
+            category: found?.category || '공간설계',
+            summary: found?.summary || '',
+            keywords: found?.keywords || '',
+            purpose: found?.purpose || '',
+            effect: found?.effect || '',
+            images: Array.isArray(found?.images) ? found.images : [],
+          };
+        });
 
-const handleCopyFromPrevious = () => {
-  if (!previousProposal || isLocked) return;
+        setProposal((prev) => ({
+          ...prev,
+          userId: user.id,
+          roundNumber: selectedRound,
+          studentId: user.student_id || '',
+          name: user.name,
+          careerPath: previousProposal.career_path || '',
+          title: previousProposal.title || '',
+          author: previousProposal.author || '',
+          genre: previousProposal.genre || '',
+          plot: previousProposal.plot || '',
+          subject: previousProposal.subject || '',
+          reason: previousProposal.reason || '',
+          is_submitted: false,
+          is_evaluated: false,
+          works: copiedWorks,
+        }));
 
-  setShowConfirmModal({
-    show: true,
-    title: `${selectedRound - 1}차 내용 불러오기`,
-    message: `${selectedRound - 1}차 내용을 현재 ${selectedRound}차 작성란에 복사합니다. 현재 작성 중인 내용은 덮어써집니다.`,
-    onConfirm: () => {
-      const copiedWorks: Work[] = [1, 2, 3].map((num) => {
-        const found = previousProposal.works?.find((w: any) => Number(w.work_number ?? w.workNumber) === num);
-        return {
-          workNumber: num,
-          title: found?.title || '',
-          category: found?.category || '공간설계',
-          summary: found?.summary || '',
-          keywords: found?.keywords || '',
-          purpose: found?.purpose || '',
-          effect: found?.effect || '',
-          images: Array.isArray(found?.images) ? found.images : [],
-        };
-      });
-
-      setProposal((prev) => ({
-        ...prev,
-        userId: user.id,
-        roundNumber: selectedRound,
-        studentId: user.student_id || '',
-        name: user.name,
-        careerPath: previousProposal.career_path || '',
-        title: previousProposal.title || '',
-        author: previousProposal.author || '',
-        genre: previousProposal.genre || '',
-        plot: previousProposal.plot || '',
-        subject: previousProposal.subject || '',
-        reason: previousProposal.reason || '',
-        is_submitted: false,
-        is_evaluated: false,
-        works: copiedWorks,
-      }));
-
-      setShowConfirmModal(prev => ({ ...prev, show: false }));
-    },
-    isDanger: false
-  });
-};
-  
-const handlePasswordChange = async (e: React.FormEvent) => {
-  e.preventDefault();
-  if (passwords.new !== passwords.confirm) {
-    alert('새 비밀번호가 일치하지 않습니다.');
-    return;
-  }
-  try {
-    const res = await fetch('/api/change-password', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId: user.id, newPassword: passwords.new }),
+        setShowConfirmModal(prev => ({ ...prev, show: false }));
+      },
+      isDanger: false
     });
-    if (res.ok) {
-      alert('비밀번호가 변경되었습니다.');
-      setShowPasswordModal(false);
-      setPasswords({ current: '', new: '', confirm: '' });
+  };
+
+  // ── 🟡 수정: 비밀번호 변경 에러 처리 보완 ──
+  const handlePasswordChange = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (passwords.new !== passwords.confirm) {
+      alert('새 비밀번호가 일치하지 않습니다.');
+      return;
     }
-  } catch (err) {
-    alert('비밀번호 변경에 실패했습니다.');
-  }
-};
+    try {
+      const res = await fetch('/api/change-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.id, newPassword: passwords.new }),
+      });
+      if (res.ok) {
+        alert('비밀번호가 변경되었습니다.');
+        setShowPasswordModal(false);
+        setPasswords({ current: '', new: '', confirm: '' });
+      } else {
+        // ── 🟡 수정: 실패 시 서버 에러 메시지 표시 ──
+        const errData = await res.json().catch(() => null);
+        alert(errData?.error || '비밀번호 변경에 실패했습니다.');
+      }
+    } catch (err) {
+      alert('비밀번호 변경에 실패했습니다.');
+    }
+  };
 
   return (
     <div className="space-y-8">
-    <header className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
-  <div>
-    <h2 className="text-3xl font-bold tracking-tight">졸업작품 기획안 제출</h2>
-    <p className="text-black/50 mt-1">차수별 기획안을 작성하고 심사 결과를 확인하세요.</p>
-  </div>
+      <header className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
+        <div>
+          <h2 className="text-3xl font-bold tracking-tight">졸업작품 기획안 제출</h2>
+          <p className="text-black/50 mt-1">차수별 기획안을 작성하고 심사 결과를 확인하세요.</p>
+        </div>
 
-  <div className="flex flex-col items-end gap-2">
-    <div className="flex gap-2 flex-wrap justify-end">
-      <button
-        onClick={() => setShowPasswordModal(true)}
-        className="flex items-center gap-2 px-4 py-1.5 bg-white border border-black/10 rounded-xl text-xs font-bold hover:bg-black/5 transition-all"
-      >
-        <Lock size={14} /> 비밀번호 변경
-      </button>
-
-      {selectedRound > 1 && previousProposal && (
-        <>
-          <button
-            type="button"
-            onClick={() => setShowPreviousProposal(v => !v)}
-            className="px-4 py-1.5 bg-white border border-black/10 rounded-xl text-xs font-bold hover:bg-black/5 transition-all"
-          >
-            {showPreviousProposal ? `${selectedRound - 1}차 숨기기` : `${selectedRound - 1}차 보기`}
-          </button>
-
-          {!isLocked && (
+        <div className="flex flex-col items-end gap-2">
+          <div className="flex gap-2 flex-wrap justify-end">
             <button
-              type="button"
-              onClick={handleCopyFromPrevious}
-              className="px-4 py-1.5 bg-blue-50 text-blue-700 border border-blue-100 rounded-xl text-xs font-bold hover:bg-blue-100 transition-all"
+              onClick={() => setShowPasswordModal(true)}
+              className="flex items-center gap-2 px-4 py-1.5 bg-white border border-black/10 rounded-xl text-xs font-bold hover:bg-black/5 transition-all"
             >
-              {selectedRound - 1}차 내용 불러오기
+              <Lock size={14} /> 비밀번호 변경
             </button>
+
+            {selectedRound > 1 && previousProposal && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setShowPreviousProposal(v => !v)}
+                  className="px-4 py-1.5 bg-white border border-black/10 rounded-xl text-xs font-bold hover:bg-black/5 transition-all"
+                >
+                  {showPreviousProposal ? `${selectedRound - 1}차 숨기기` : `${selectedRound - 1}차 보기`}
+                </button>
+
+                {!isLocked && (
+                  <button
+                    type="button"
+                    onClick={handleCopyFromPrevious}
+                    className="px-4 py-1.5 bg-blue-50 text-blue-700 border border-blue-100 rounded-xl text-xs font-bold hover:bg-blue-100 transition-all"
+                  >
+                    {selectedRound - 1}차 내용 불러오기
+                  </button>
+                )}
+              </>
+            )}
+
+            <div className="flex gap-2 bg-black/5 p-1 rounded-xl">
+              {[1, 2, 3].map(num => (
+                <button
+                  key={num}
+                  onClick={() => setSelectedRound(num)}
+                  className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                    selectedRound === num ? 'bg-white text-black shadow-sm' : 'text-black/40 hover:text-black'
+                  }`}
+                >
+                  {num}차
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {currentRoundInfo && (
+            <div className="flex flex-col items-end gap-1">
+              {lastAutoSave && (
+                <span className="text-[10px] font-bold text-black/20 flex items-center gap-1">
+                  <Save size={10} /> {lastAutoSave.toLocaleTimeString()} 자동 저장됨
+                </span>
+              )}
+              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                currentRoundInfo.is_open ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'
+              }`}>
+                {currentRoundInfo.is_open ? '입력 가능 기간' : '입력 마감'}
+              </span>
+            </div>
           )}
-        </>
-      )}
 
-      <div className="flex gap-2 bg-black/5 p-1 rounded-xl">
-        {[1, 2, 3].map(num => (
-          <button
-            key={num}
-            onClick={() => setSelectedRound(num)}
-            className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${
-              selectedRound === num ? 'bg-white text-black shadow-sm' : 'text-black/40 hover:text-black'
-            }`}
-          >
-            {num}차
-          </button>
-        ))}
-      </div>
-    </div>
-
-    {currentRoundInfo && (
-      <div className="flex flex-col items-end gap-1">
-        {lastAutoSave && (
-          <span className="text-[10px] font-bold text-black/20 flex items-center gap-1">
-            <Save size={10} /> {lastAutoSave.toLocaleTimeString()} 자동 저장됨
-          </span>
-        )}
-        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-          currentRoundInfo.is_open ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'
-        }`}>
-          {currentRoundInfo.is_open ? '입력 가능 기간' : '입력 마감'}
-        </span>
-      </div>
-    )}
-
-    {selectedRound > 1 && previousProposal && showPreviousProposal && (
-      <div className="mt-4 w-full bg-blue-50 border border-blue-100 rounded-2xl p-5 text-sm">
-        <div className="font-bold text-blue-800 mb-3">
-          {selectedRound - 1}차 제출안 참고
+          {selectedRound > 1 && previousProposal && showPreviousProposal && (
+            <div className="mt-4 w-full bg-blue-50 border border-blue-100 rounded-2xl p-5 text-sm">
+              <div className="font-bold text-blue-800 mb-3">
+                {selectedRound - 1}차 제출안 참고
+              </div>
+              <div className="grid md:grid-cols-2 gap-4 text-black/70">
+                <div>
+                  <div><span className="font-bold">텍스트명:</span> {previousProposal.title || '-'}</div>
+                  <div><span className="font-bold">작가명:</span> {previousProposal.author || '-'}</div>
+                  <div><span className="font-bold">장르:</span> {previousProposal.genre || '-'}</div>
+                </div>
+                <div>
+                  <div><span className="font-bold">주제:</span> {previousProposal.subject || '-'}</div>
+                  <div><span className="font-bold">기획 의도:</span> {previousProposal.reason || '-'}</div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
-        <div className="grid md:grid-cols-2 gap-4 text-black/70">
-          <div>
-            <div><span className="font-bold">텍스트명:</span> {previousProposal.title || '-'}</div>
-            <div><span className="font-bold">작가명:</span> {previousProposal.author || '-'}</div>
-            <div><span className="font-bold">장르:</span> {previousProposal.genre || '-'}</div>
-          </div>
-          <div>
-            <div><span className="font-bold">주제:</span> {previousProposal.subject || '-'}</div>
-            <div><span className="font-bold">기획 의도:</span> {previousProposal.reason || '-'}</div>
-          </div>
-        </div>
-      </div>
-    )}
-  </div>
-</header>
+      </header>
 
-      {/* Password Modal */}
+      {/* 비밀번호 변경 모달 */}
       <AnimatePresence>
         {showPasswordModal && (
           <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <motion.div 
+            <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
@@ -544,7 +576,7 @@ const handlePasswordChange = async (e: React.FormEvent) => {
                   <input
                     type="password"
                     value={passwords.new || ''}
-                    onChange={e => setPasswords({...passwords, new: e.target.value})}
+                    onChange={e => setPasswords({ ...passwords, new: e.target.value })}
                     className="w-full px-4 py-2.5 rounded-xl border border-black/10 focus:ring-2 focus:ring-black/5 outline-none"
                     required
                   />
@@ -554,7 +586,7 @@ const handlePasswordChange = async (e: React.FormEvent) => {
                   <input
                     type="password"
                     value={passwords.confirm || ''}
-                    onChange={e => setPasswords({...passwords, confirm: e.target.value})}
+                    onChange={e => setPasswords({ ...passwords, confirm: e.target.value })}
                     className="w-full px-4 py-2.5 rounded-xl border border-black/10 focus:ring-2 focus:ring-black/5 outline-none"
                     required
                   />
@@ -580,11 +612,11 @@ const handlePasswordChange = async (e: React.FormEvent) => {
         )}
       </AnimatePresence>
 
-      {/* Confirmation Modal */}
+      {/* 확인 모달 */}
       <AnimatePresence>
         {showConfirmModal.show && (
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
-            <motion.div 
+            <motion.div
               initial={{ opacity: 0, scale: 0.95, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
@@ -627,7 +659,7 @@ const handlePasswordChange = async (e: React.FormEvent) => {
       {proposal.is_evaluated && (
         <div className="bg-amber-50 border border-amber-100 text-amber-700 px-6 py-4 rounded-2xl text-sm font-medium flex items-center gap-2">
           <CheckCircle size={18} />
-         최종 저장된 상태입니다. 수정하려면 수정 버튼을 눌러주세요.
+          최종 저장된 상태입니다. 수정하려면 수정 버튼을 눌러주세요.
         </div>
       )}
 
@@ -639,7 +671,7 @@ const handlePasswordChange = async (e: React.FormEvent) => {
       )}
 
       <form onSubmit={(e) => handleSubmit(e)} className="space-y-8 pb-20">
-        {/* 개인정보 및 텍스트 정보 */}
+        {/* 기본 정보 */}
         <section className={`bg-white p-8 rounded-3xl shadow-sm border border-black/5 space-y-6 ${isLocked ? 'opacity-80' : ''}`}>
           <div className="flex justify-between items-center border-b border-black/5 pb-4">
             <h3 className="text-xl font-semibold">기본 정보</h3>
@@ -648,28 +680,18 @@ const handlePasswordChange = async (e: React.FormEvent) => {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div>
               <label className="block text-sm font-medium mb-2">학번</label>
-              <input
-                type="text"
-                value={proposal.studentId || ''}
-                readOnly
-                className="w-full px-4 py-2.5 rounded-xl border border-black/10 bg-black/[0.02] outline-none"
-              />
+              <input type="text" value={proposal.studentId || ''} readOnly className="w-full px-4 py-2.5 rounded-xl border border-black/10 bg-black/[0.02] outline-none" />
             </div>
             <div>
               <label className="block text-sm font-medium mb-2">이름</label>
-              <input
-                type="text"
-                value={proposal.name || ''}
-                readOnly
-                className="w-full px-4 py-2.5 rounded-xl border border-black/10 bg-black/[0.02] outline-none"
-              />
+              <input type="text" value={proposal.name || ''} readOnly className="w-full px-4 py-2.5 rounded-xl border border-black/10 bg-black/[0.02] outline-none" />
             </div>
             <div>
               <label className="block text-sm font-medium mb-2">희망진로</label>
               <input
                 type="text"
                 value={proposal.careerPath || ''}
-                onChange={e => setProposal({...proposal, careerPath: e.target.value})}
+                onChange={e => setProposal({ ...proposal, careerPath: e.target.value })}
                 disabled={isLocked}
                 className="w-full px-4 py-2.5 rounded-xl border border-black/10 focus:ring-2 focus:ring-black/5 outline-none disabled:bg-black/[0.02]"
                 required
@@ -683,7 +705,7 @@ const handlePasswordChange = async (e: React.FormEvent) => {
               <input
                 type="text"
                 value={proposal.title || ''}
-                onChange={e => setProposal({...proposal, title: e.target.value})}
+                onChange={e => setProposal({ ...proposal, title: e.target.value })}
                 disabled={isLocked}
                 className="w-full px-4 py-2.5 rounded-xl border border-black/10 focus:ring-2 focus:ring-black/5 outline-none disabled:bg-black/[0.02] break-words"
                 required
@@ -694,7 +716,7 @@ const handlePasswordChange = async (e: React.FormEvent) => {
               <input
                 type="text"
                 value={proposal.author || ''}
-                onChange={e => setProposal({...proposal, author: e.target.value})}
+                onChange={e => setProposal({ ...proposal, author: e.target.value })}
                 disabled={isLocked}
                 className="w-full px-4 py-2.5 rounded-xl border border-black/10 focus:ring-2 focus:ring-black/5 outline-none disabled:bg-black/[0.02] break-words"
                 required
@@ -705,7 +727,7 @@ const handlePasswordChange = async (e: React.FormEvent) => {
               <input
                 type="text"
                 value={proposal.genre || ''}
-                onChange={e => setProposal({...proposal, genre: e.target.value})}
+                onChange={e => setProposal({ ...proposal, genre: e.target.value })}
                 disabled={isLocked}
                 className="w-full px-4 py-2.5 rounded-xl border border-black/10 focus:ring-2 focus:ring-black/5 outline-none disabled:bg-black/[0.02] break-words"
                 required
@@ -718,7 +740,7 @@ const handlePasswordChange = async (e: React.FormEvent) => {
               <label className="block text-sm font-medium mb-2">줄거리</label>
               <textarea
                 value={proposal.plot || ''}
-                onChange={e => setProposal({...proposal, plot: e.target.value})}
+                onChange={e => setProposal({ ...proposal, plot: e.target.value })}
                 disabled={isLocked}
                 className="w-full px-4 py-3 rounded-xl border border-black/10 focus:ring-2 focus:ring-black/5 outline-none min-h-[100px] disabled:bg-black/[0.02] break-words"
                 required
@@ -728,7 +750,7 @@ const handlePasswordChange = async (e: React.FormEvent) => {
               <label className="block text-sm font-medium mb-2">주제</label>
               <textarea
                 value={proposal.subject || ''}
-                onChange={e => setProposal({...proposal, subject: e.target.value})}
+                onChange={e => setProposal({ ...proposal, subject: e.target.value })}
                 disabled={isLocked}
                 className="w-full px-4 py-3 rounded-xl border border-black/10 focus:ring-2 focus:ring-black/5 outline-none min-h-[80px] disabled:bg-black/[0.02] break-words"
                 required
@@ -738,7 +760,7 @@ const handlePasswordChange = async (e: React.FormEvent) => {
               <label className="block text-sm font-medium mb-2">선정이유</label>
               <textarea
                 value={proposal.reason || ''}
-                onChange={e => setProposal({...proposal, reason: e.target.value})}
+                onChange={e => setProposal({ ...proposal, reason: e.target.value })}
                 disabled={isLocked}
                 className="w-full px-4 py-3 rounded-xl border border-black/10 focus:ring-2 focus:ring-black/5 outline-none min-h-[80px] disabled:bg-black/[0.02] break-words"
                 required
@@ -747,7 +769,7 @@ const handlePasswordChange = async (e: React.FormEvent) => {
           </div>
         </section>
 
-        {/* 작품 정보 (1, 2, 3) */}
+        {/* 작품 정보 */}
         <div className="space-y-8">
           {proposal.works?.map((work, idx) => (
             <section key={idx} className={`bg-white p-8 rounded-3xl shadow-sm border border-black/5 space-y-6 ${isLocked ? 'opacity-80' : ''}`}>
