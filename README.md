@@ -1,20 +1,29 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# 공간연출과 졸업작품 심사 시스템
 
-# Run and deploy your AI Studio app
+학생들의 졸업작품 기획안 업로드 및 교수진 심사, 성적 통계를 관리하는 웹 시스템입니다.
 
-This contains everything you need to run your app locally.
+## 기술 스택
 
-View your app in AI Studio: https://ai.studio/apps/b4ddd1f4-83fd-4bd8-a765-7ec1b21bf2c8
+- **Frontend**: React 19, TypeScript, Tailwind CSS, Framer Motion
+- **Backend**: Express.js, Node.js
+- **Database**: PostgreSQL
+- **Storage**: Supabase Storage (이미지 업로드)
+- **Auth**: JWT (httpOnly Cookie)
 
-## Run Locally
+## 환경변수 설정
 
-**Prerequisites:**  Node.js
+`.env.example`을 참고하여 `.env` 파일을 생성하세요.
 
+| 변수명 | 설명 |
+|---|---|
+| `DATABASE_URL` | PostgreSQL 연결 문자열 |
+| `JWT_SECRET` | JWT 서명 키 (필수) |
+| `SUPABASE_URL` | Supabase 프로젝트 URL |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase 서비스 롤 키 |
+| `SUPABASE_STORAGE_BUCKET` | 이미지 버킷명 (기본값: work-images) |
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+## 실행 방법
+
+```bash
+npm install
+npm run dev
