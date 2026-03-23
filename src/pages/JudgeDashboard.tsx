@@ -1160,15 +1160,17 @@ if (entrySource === 'admin' && onBackToAdminStats) {
             </div>
           )}
 
-          <button
-            onClick={() => setShowRanking(!showRanking)}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all border
-              ${showRanking
-                ? 'bg-black text-white border-black'
-                : 'bg-white text-black/40 border-black/10 hover:border-black/30'}`}
-          >
-            {showRanking ? '순위 숨기기' : '내 순위 보기'}
-          </button>
+            {user.role !== 'admin' && (
+  <button
+    onClick={() => setShowRanking(!showRanking)}
+    className={`px-4 py-2 rounded-xl text-xs font-bold transition-all border
+      ${showRanking
+        ? 'bg-black text-white border-black'
+        : 'bg-white text-black/40 border-black/10 hover:border-black/30'}`}
+  >
+    {showRanking ? '순위 숨기기' : '내 순위 보기'}
+  </button>
+)}
 
           <div className="flex gap-2 bg-black/5 p-1 rounded-xl">
             {[1, 2, 3].map(num => (
@@ -1234,7 +1236,7 @@ if (entrySource === 'admin' && onBackToAdminStats) {
           })}
         </div>
 
-        {showRanking && (
+            {showRanking && user.role !== 'admin' && (
           <aside className="w-full lg:w-80 space-y-6">
             <section className="bg-white p-6 rounded-3xl shadow-sm border border-black/5 sticky top-24">
               <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
