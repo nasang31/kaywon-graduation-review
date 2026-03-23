@@ -1,84 +1,50 @@
+// server.ts
 import "dotenv/config";
-import express from "express";
-import { createServer as createViteServer } from "vite";
-import pg from "pg";
-import path from "path";
+import express, { Request, Response, NextFunction } from "express";
+import { Pool } from "pg";
 import multer from "multer";
-import bcrypt from "bcryptjs";
+import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import cookieParser from "cookie-parser";
 import { createClient } from "@supabase/supabase-js";
+import * as XLSX from "xlsx";
 
-const { Pool } = pg;
-
-declare global {
-  namespace Express {
-    interface Request {
-      user?: {
-        id: string;
-        username: string;
-        role: string;
-      };
-    }
+// ──────────────────────────────────────────────
+// 1. 환경변수 필수 검증
+// ──────────────────────────────────────────────
+const REQUIRED_ENV = [
+  "JWT_SECRET",
+  "DATABASE_URL",
+  "SUPABASE_URL",
+  "SUPABASE_SERVICE_ROLE_KEY",
+];
+for (const key of REQUIRED_ENV) {
+  if (!process.env[key]) {
+    console.error(`[FATAL] 환경변수 '${key}'가 설정되지 않았습니다. 서버를 종료합니다.`);
+    process.exit(1);
   }
 }
 
-const app = express();
-const PORT = parseInt(process.env.PORT || "3000", 10);
+const JWT_SECRET = process.env.JWT_SECRET as string;
+const PORT = parseInt(process.env.PORT ?? "3000", 10);
+const STORAGE_BUCKET = process.env.SUPABASE_STORAGE_BUCKET ?? "work-images";
 
-// ✅ JWT_SECRET 환경변수 없으면 서버 시작 거부
-if (!process.env.JWT_SECRET) {
-  console.error("[FATAL] JWT_SECRET 환경변수가 설정되지 않았습니다. 서버를 시작할 수 없습니다.");
-  process.exit(1);
-}
-const JWT_SECRET = process.env.JWT_SECRET;
+// ──────────────────────────────────────────────
+// 2. DB / Supabase 클라이언트 초기화
+// ──────────────────────────────────────────────
+const db = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.DB_SSL === "true" ? { rejectUnauthorized: false } : false,
+});
 
-const IS_PROD = process.env.NODE_ENV === "production";
+const supabase = createClient(
+  process.env.SUPABASE_URL as string,
+  process.env.SUPABASE_SERVICE_ROLE_KEY as string
+);
 
-function createPool() {
-  if (process.env.DATABASE_URL) {
-    return new Pool({
-      connectionString: process.env.DATABASE_URL,
-      ssl: { rejectUnauthorized: false },
-    });
-  }
-
-  return new Pool({
-    host: process.env.DB_HOST,
-    user: process.env.DB_USER,
-    password: process.env.DB_PASS,
-    database: process.env.DB_NAME || "postgres",
-    port: parseInt(process.env.DB_PORT || "5432", 10),
-    ssl: { rejectUnauthorized: false },
-  });
-}
-
-const pgPool = createPool();
-
-const db = {
-  async exec(sql: string) {
-    await pgPool.query(sql);
-  },
-  async query(sql: string, params: any[] = []) {
-    let i = 1;
-    const pgSql = sql.replace(/\?/g, () => `$${i++}`);
-    const res = await pgPool.query(pgSql, params);
-    return res.rows;
-  },
-  async get(sql: string, params: any[] = []) {
-    let i = 1;
-    const pgSql = sql.replace(/\?/g, () => `$${i++}`);
-    const res = await pgPool.query(pgSql, params);
-    return res.rows[0] || null;
-  },
-  async run(sql: string, params: any[] = []) {
-    let i = 1;
-    const pgSql = sql.replace(/\?/g, () => `$${i++}`);
-    const res = await pgPool.query(pgSql, params);
-    return { lastInsertRowid: null, changes: res.rowCount ?? 0 };
-  },
-};
-
+// ──────────────────────────────────────────────
+// 3. 등급 → 점수 맵 및 scoreOrNull 헬퍼
+// ──────────────────────────────────────────────
 const gradeMap: Record<string, number> = {
   "A+": 99,
   "A0": 95,
@@ -91,1091 +57,1388 @@ const gradeMap: Record<string, number> = {
   "C-": 71,
   "D+": 69,
   "D0": 65,
-  "F": 0,
+  "F":  0,
 };
 
-const gradeCandidates = ["A+", "A0", "A-", "B+", "B0", "B-", "C+"];
-
-function randomGrade() {
-  return gradeCandidates[Math.floor(Math.random() * gradeCandidates.length)];
-}
-
-function hashPassword(pw: string) {
-  return bcrypt.hashSync(pw, 10);
-}
-
-function isBcryptHash(value?: string | null) {
-  return !!value && /^\$2[aby]\$/.test(value);
-}
-
-function verifyPassword(input: string, stored?: string | null) {
-  if (!stored) return false;
-  if (isBcryptHash(stored)) return bcrypt.compareSync(input, stored);
-  return stored === input;
-}
-
-function normalizeBoolInt(value: any) {
-  return value === true || value === 1 || value === "1" ? 1 : 0;
-}
-
-function normalizeWorks(works: any[]) {
-  if (!Array.isArray(works)) return [];
-  return works.map((work: any, index: number) => ({
-    workNumber: Number(work.workNumber ?? work.work_number ?? index + 1),
-    title: work.title ?? "",
-    category: work.category ?? "",
-    summary: work.summary ?? "",
-    keywords: work.keywords ?? "",
-    purpose: work.purpose ?? "",
-    effect: work.effect ?? "",
-    images: Array.isArray(work.images) ? work.images : [],
-  }));
-}
-
-function normalizeIsFinal(value: any, fallbackWhenUndefined = true) {
-  if (value === undefined || value === null) return fallbackWhenUndefined;
-  return value === true || value === "true" || value === 1 || value === "1";
-}
-
-// ✅ 알 수 없는 등급값은 null 반환, F는 정상적으로 0 반환
-function scoreOrNull(grade: any): number | null {
-  if (grade === undefined || grade === null || grade === "") return null;
-  const score = gradeMap[String(grade)];
-  if (score === undefined) {
-    console.warn(`[scoreOrNull] 알 수 없는 등급값: "${grade}"`);
-    return null;
+/**
+ * 등급 문자열을 점수(number)로 변환.
+ * - 유효한 등급 → 해당 점수 반환 (F → 0 포함)
+ * - undefined / null / 빈 문자열 → null (미입력)
+ * - 알 수 없는 등급 문자열 → null (안전 처리)
+ */
+function scoreOrNull(grade: string | null | undefined): number | null {
+  if (grade === undefined || grade === null || grade.trim() === "") return null;
+  const trimmed = grade.trim();
+  if (Object.prototype.hasOwnProperty.call(gradeMap, trimmed)) {
+    return gradeMap[trimmed];
   }
-  return score;
+  return null;
 }
 
-function average(values: Array<number | null | undefined>) {
-  const filtered = values.filter((v): v is number => typeof v === "number" && v >= 0 && !Number.isNaN(v));
-  if (filtered.length === 0) return 0;
-  return filtered.reduce((acc, v) => acc + v, 0) / filtered.length;
+// ──────────────────────────────────────────────
+// 4. 유틸 함수
+// ──────────────────────────────────────────────
+function average(nums: number[]): number {
+  if (nums.length === 0) return 0;
+  return nums.reduce((a, b) => a + b, 0) / nums.length;
 }
 
-app.use(express.json({ limit: "50mb" }));
+function roundTwo(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+async function hashPassword(plain: string): Promise<string> {
+  return bcrypt.hash(plain, 12);
+}
+
+function normalizeBoolean(val: unknown): boolean {
+  if (typeof val === "boolean") return val;
+  if (typeof val === "string") return val === "true" || val === "1";
+  return Boolean(val);
+}
+
+function normalizeWorks(
+  raw: unknown
+): Array<{ title: string; description: string }> {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((w) => w && typeof w === "object")
+    .map((w: any) => ({
+      title: String(w.title ?? "").trim(),
+      description: String(w.description ?? "").trim(),
+    }));
+}
+
+// ──────────────────────────────────────────────
+// 5. 스키마 초기화 및 시드 (DDL 구문 분리)
+// ──────────────────────────────────────────────
+async function ensureSchema(): Promise<void> {
+  await db.query(`CREATE EXTENSION IF NOT EXISTS "pgcrypto"`);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      username    TEXT UNIQUE NOT NULL,
+      password    TEXT NOT NULL,
+      name        TEXT NOT NULL,
+      role        TEXT NOT NULL DEFAULT 'student',
+      department  TEXT,
+      student_id  TEXT,
+      created_at  TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS rounds (
+      id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      round_number INT UNIQUE NOT NULL,
+      is_active    BOOLEAN NOT NULL DEFAULT FALSE,
+      name         TEXT,
+      created_at   TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS proposals (
+      id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      student_id   UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      round_number INT NOT NULL,
+      title        TEXT NOT NULL,
+      content      TEXT,
+      is_final     BOOLEAN NOT NULL DEFAULT FALSE,
+      created_at   TIMESTAMPTZ DEFAULT NOW(),
+      updated_at   TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS works (
+      id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      proposal_id UUID NOT NULL REFERENCES proposals(id) ON DELETE CASCADE,
+      title       TEXT NOT NULL,
+      description TEXT,
+      created_at  TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS work_images (
+      id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      work_id     UUID NOT NULL REFERENCES works(id) ON DELETE CASCADE,
+      url         TEXT NOT NULL,
+      order_index INT NOT NULL DEFAULT 0
+    )
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS evaluations (
+      id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      proposal_id UUID NOT NULL REFERENCES proposals(id) ON DELETE CASCADE,
+      judge_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      scores      JSONB NOT NULL DEFAULT '{}',
+      comment     TEXT,
+      is_final    BOOLEAN NOT NULL DEFAULT FALSE,
+      total_score NUMERIC(6,2),
+      created_at  TIMESTAMPTZ DEFAULT NOW(),
+      updated_at  TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(proposal_id, judge_id)
+    )
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS presentation_orders (
+      id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      round_number INT NOT NULL,
+      proposal_id  UUID NOT NULL REFERENCES proposals(id) ON DELETE CASCADE,
+      order_index  INT NOT NULL DEFAULT 0,
+      UNIQUE(round_number, proposal_id)
+    )
+  `);
+
+  // 초기 관리자 계정
+  const adminExists = await db.query(
+    "SELECT id FROM users WHERE username = $1",
+    ["admin"]
+  );
+  if (adminExists.rows.length === 0) {
+    const hashed = await hashPassword("admin1234");
+    await db.query(
+      "INSERT INTO users (username, password, name, role) VALUES ($1, $2, $3, $4)",
+      ["admin", hashed, "관리자", "admin"]
+    );
+  }
+
+  // 기본 라운드 1
+  const roundExists = await db.query(
+    "SELECT id FROM rounds WHERE round_number = $1",
+    [1]
+  );
+  if (roundExists.rows.length === 0) {
+    await db.query(
+      "INSERT INTO rounds (round_number, is_active, name) VALUES ($1, $2, $3)",
+      [1, true, "1차 심사"]
+    );
+  }
+}
+
+// ──────────────────────────────────────────────
+// 6. Express 앱 설정
+// ──────────────────────────────────────────────
+const app = express();
+app.use(express.json({ limit: "20mb" }));
+app.use(express.urlencoded({ extended: true, limit: "20mb" }));
 app.use(cookieParser());
-
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const SUPABASE_STORAGE_BUCKET = process.env.SUPABASE_STORAGE_BUCKET || "work-images";
-
-if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-  console.warn("[upload] Supabase Storage 환경변수가 없습니다. 업로드 기능이 동작하지 않을 수 있습니다.");
-}
-
-const supabase = createClient(
-  SUPABASE_URL || "",
-  SUPABASE_SERVICE_ROLE_KEY || "",
-  {
-    auth: {
-      persistSession: false,
-      autoRefreshToken: false,
-    },
-  }
-);
 
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 },
-  fileFilter: (_req, file, cb) => {
-    const allowedMimeTypes = /image\/(jpeg|jpg|png|gif)/;
-    const allowedExtensions = /\.(jpg|jpeg|png|gif)$/i;
-    const mimetype = allowedMimeTypes.test(file.mimetype);
-    const extname = allowedExtensions.test(path.extname(file.originalname).toLowerCase());
-
-    if (mimetype || extname) return cb(null, true);
-
-    cb(
-      new Error(
-        `허용되지 않는 파일 형식입니다. (MIME: ${file.mimetype}, Ext: ${path.extname(file.originalname)})`
-      )
-    );
-  },
 });
 
-function sanitizeFilename(filename: string) {
-  const ext = path.extname(filename).toLowerCase();
-  const base = path.basename(filename, ext).replace(/[^a-z0-9]/gi, "_").toLowerCase();
-  return `${Date.now()}-${base}${ext}`;
+// ──────────────────────────────────────────────
+// 7. 미들웨어: 인증 / 관리자 권한
+// ──────────────────────────────────────────────
+interface AuthenticatedRequest extends Request {
+  user?: { id: string; username: string; role: string; name: string };
 }
 
-async function uploadImageToSupabase(file: Express.Multer.File) {
-  const fileName = sanitizeFilename(file.originalname);
-  const filePath = `uploads/${fileName}`;
-
-  const { error } = await supabase.storage
-    .from(SUPABASE_STORAGE_BUCKET)
-    .upload(filePath, file.buffer, {
-      contentType: file.mimetype,
-      upsert: false,
-      cacheControl: "3600",
-    });
-
-  if (error) throw error;
-
-  const { data } = supabase.storage
-    .from(SUPABASE_STORAGE_BUCKET)
-    .getPublicUrl(filePath);
-
-  return data.publicUrl;
-}
-
-const authenticate = (req: any, res: any, next: any) => {
-  const token = req.cookies.token;
+function authMiddleware(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): void {
+  const token =
+    req.cookies?.token ??
+    req.headers.authorization?.replace("Bearer ", "");
   if (!token) {
-    return res.status(401).json({ error: "로그인이 필요합니다." });
+    res.status(401).json({ error: "인증이 필요합니다." });
+    return;
   }
-
   try {
-    const decoded = jwt.verify(token, JWT_SECRET) as any;
+    const decoded = jwt.verify(
+      token,
+      JWT_SECRET
+    ) as AuthenticatedRequest["user"];
     req.user = decoded;
     next();
-  } catch (_err) {
-    res.clearCookie("token");
-    return res.status(401).json({ error: "인증 세션이 만료되었습니다. 다시 로그인해주세요." });
+  } catch {
+    res.status(401).json({ error: "유효하지 않은 토큰입니다." });
   }
-};
-
-const authorize = (roles: string[]) => {
-  return (req: any, res: any, next: any) => {
-    if (!req.user || !roles.includes(req.user.role)) {
-      return res.status(403).json({ error: "권한이 없습니다." });
-    }
-    next();
-  };
-};
-
-async function ensureSchema() {
-  await db.exec(`
-    CREATE TABLE IF NOT EXISTS users (
-      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-      created_at timestamptz DEFAULT now(),
-      username text UNIQUE NOT NULL,
-      password text NOT NULL,
-      role text NOT NULL,
-      name text NOT NULL,
-      student_id text,
-      needs_password_change integer DEFAULT 1,
-      initial_password text
-    );
-
-    CREATE TABLE IF NOT EXISTS rounds (
-      round_number integer PRIMARY KEY,
-      is_open integer DEFAULT 0,
-      name text
-    );
-
-    CREATE TABLE IF NOT EXISTS proposals (
-      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-      created_at timestamptz DEFAULT now(),
-      user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      round_number integer NOT NULL REFERENCES rounds(round_number) ON DELETE CASCADE,
-      student_id text,
-      name text,
-      career_path text,
-      title text,
-      author text,
-      genre text,
-      plot text,
-      subject text,
-      reason text,
-      is_submitted integer DEFAULT 0,
-      presentation_order integer DEFAULT 0,
-      is_participating integer DEFAULT 0,
-      UNIQUE (user_id, round_number)
-    );
-
-    CREATE TABLE IF NOT EXISTS works (
-      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-      created_at timestamptz DEFAULT now(),
-      proposal_id uuid NOT NULL REFERENCES proposals(id) ON DELETE CASCADE,
-      work_number integer NOT NULL,
-      title text,
-      category text,
-      summary text,
-      keywords text,
-      purpose text,
-      effect text
-    );
-
-    CREATE TABLE IF NOT EXISTS work_images (
-      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-      created_at timestamptz DEFAULT now(),
-      work_id uuid NOT NULL REFERENCES works(id) ON DELETE CASCADE,
-      url text
-    );
-
-    CREATE TABLE IF NOT EXISTS evaluations (
-      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-      created_at timestamptz DEFAULT now(),
-      proposal_id uuid NOT NULL REFERENCES proposals(id) ON DELETE CASCADE,
-      judge_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      text_grade text,
-      work1_grade text,
-      work2_grade text,
-      work3_grade text,
-      comment text,
-      UNIQUE (proposal_id, judge_id)
-    );
-  `);
-
-  await db.exec(`
-    ALTER TABLE evaluations ADD COLUMN IF NOT EXISTS is_final BOOLEAN DEFAULT false;
-    ALTER TABLE evaluations ADD COLUMN IF NOT EXISTS finalized_at timestamptz;
-  `);
-
-  // ✅ is_final 강제 업데이트 블록 제거 — 서버 재시작 시 임시 저장 평가가
-  //    의도치 않게 최종 확정되는 버그 방지. 1차 심사 데이터는 이미 is_final=true로
-  //    저장되어 있으므로 이 코드 제거가 기존 데이터에 영향 없음.
-
-  const roundCount = await db.get("SELECT COUNT(*)::int as count FROM rounds") as any;
-  if (!roundCount || Number(roundCount.count) === 0) {
-    await db.run("INSERT INTO rounds (round_number, is_open, name) VALUES (?, ?, ?)", [1, 1, "졸업작품 기획 1차 심사"]);
-    await db.run("INSERT INTO rounds (round_number, is_open, name) VALUES (?, ?, ?)", [2, 0, "졸업작품 기획 2차 심사"]);
-    await db.run("INSERT INTO rounds (round_number, is_open, name) VALUES (?, ?, ?)", [3, 0, "졸업작품 기획 3차 심사"]);
-  }
-
-  const adminUser = await db.get("SELECT * FROM users WHERE username = ?", ["admin"]) as any;
-  if (!adminUser) {
-    await db.run(
-      "INSERT INTO users (username, password, role, name, student_id, needs_password_change, initial_password) VALUES (?, ?, ?, ?, ?, ?, ?)",
-      ["admin", hashPassword("admin123"), "admin", "관리자", null, 0, "admin123"]
-    );
-  } else if (!isBcryptHash(adminUser.password)) {
-    await db.run("UPDATE users SET password = ?, needs_password_change = 0 WHERE username = ?", [hashPassword(adminUser.password), "admin"]);
-  }
-
-  await db.exec(`
-    UPDATE evaluations SET text_grade = 'A0' WHERE text_grade = 'A';
-    UPDATE evaluations SET text_grade = 'B0' WHERE text_grade = 'B';
-    UPDATE evaluations SET text_grade = 'C0' WHERE text_grade = 'C';
-    UPDATE evaluations SET text_grade = 'D0' WHERE text_grade = 'D';
-    UPDATE evaluations SET work1_grade = 'A0' WHERE work1_grade = 'A';
-    UPDATE evaluations SET work1_grade = 'B0' WHERE work1_grade = 'B';
-    UPDATE evaluations SET work1_grade = 'C0' WHERE work1_grade = 'C';
-    UPDATE evaluations SET work1_grade = 'D0' WHERE work1_grade = 'D';
-    UPDATE evaluations SET work2_grade = 'A0' WHERE work2_grade = 'A';
-    UPDATE evaluations SET work2_grade = 'B0' WHERE work2_grade = 'B';
-    UPDATE evaluations SET work2_grade = 'C0' WHERE work2_grade = 'C';
-    UPDATE evaluations SET work2_grade = 'D0' WHERE work2_grade = 'D';
-    UPDATE evaluations SET work3_grade = 'A0' WHERE work3_grade = 'A';
-    UPDATE evaluations SET work3_grade = 'B0' WHERE work3_grade = 'B';
-    UPDATE evaluations SET work3_grade = 'C0' WHERE work3_grade = 'C';
-    UPDATE evaluations SET work3_grade = 'D0' WHERE work3_grade = 'D';
-  `);
 }
 
-// Health
-app.get("/api/health", async (_req, res) => {
-  try {
-    await db.get("SELECT 1 as ok");
-    res.json({ ok: true, message: "server ok" });
-  } catch (err: any) {
-    res.status(500).json({ ok: false, error: err.message });
+function adminMiddleware(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): void {
+  if (req.user?.role !== "admin") {
+    res.status(403).json({ error: "관리자 권한이 필요합니다." });
+    return;
   }
-});
+  next();
+}
 
-// Auth
-app.post("/api/login", async (req, res) => {
-  const { username, password } = req.body;
-  const user = await db.get("SELECT * FROM users WHERE username = ?", [username]) as any;
-
-  if (user && verifyPassword(password, user.password)) {
-    const { password: _pw, ...userWithoutPassword } = user;
-    const token = jwt.sign(
-      { id: user.id, username: user.username, role: user.role },
-      JWT_SECRET,
-      { expiresIn: "24h" }
+// ──────────────────────────────────────────────
+// 8. 인증 라우트
+// ──────────────────────────────────────────────
+app.post("/api/auth/login", async (req: Request, res: Response) => {
+  const { username, password } = req.body as {
+    username?: string;
+    password?: string;
+  };
+  if (!username || !password) {
+    res.status(400).json({ error: "아이디와 비밀번호를 입력하세요." });
+    return;
+  }
+  try {
+    const result = await db.query(
+      "SELECT id, username, password, name, role FROM users WHERE username = $1",
+      [username.trim()]
     );
-
-    res.cookie("token", token, {
-      httpOnly: true,
-      secure: IS_PROD,
-      sameSite: IS_PROD ? "none" : "lax",
-      maxAge: 24 * 60 * 60 * 1000,
-    });
-
-    res.json(userWithoutPassword);
-  } else {
-    res.status(401).json({ error: "아이디 또는 비밀번호가 일치하지 않습니다." });
-  }
-});
-
-app.post("/api/logout", (_req, res) => {
-  res.clearCookie("token");
-  res.json({ success: true });
-});
-
-app.post("/api/change-password", authenticate, async (req: any, res) => {
-  const { userId, newPassword } = req.body;
-  if (req.user.role !== "admin" && req.user.id !== userId) {
-    return res.status(403).json({ error: "권한이 없습니다." });
-  }
-
-  try {
-    await db.run("UPDATE users SET password = ?, needs_password_change = 0 WHERE id = ?", [hashPassword(newPassword), userId]);
-    res.json({ success: true });
-  } catch (_err) {
-    res.status(500).json({ error: "비밀번호 변경에 실패했습니다." });
-  }
-});
-
-// Admin - User Management
-app.get("/api/admin/users", authenticate, authorize(["admin"]), async (_req, res) => {
-  const users = await db.query("SELECT id, username, name, role, student_id, needs_password_change FROM users WHERE role != 'admin' ORDER BY created_at DESC");
-  res.json(users);
-});
-
-app.get("/api/admin/rounds", authenticate, async (_req, res) => {
-  const rounds = await db.query("SELECT * FROM rounds ORDER BY round_number ASC");
-  res.json(rounds);
-});
-
-app.get("/api/rounds/current", authenticate, async (_req, res) => {
-  try {
-    const activeRound = await db.get(
-      "SELECT * FROM rounds WHERE is_open = 1 ORDER BY round_number DESC LIMIT 1"
-    ) as any;
-
-    res.json({
-      activeRoundNumber: activeRound?.round_number ?? 1,
-      round: activeRound || null,
-    });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post("/api/admin/rounds/toggle", authenticate, authorize(["admin"]), async (req, res) => {
-  const { roundNumber, isOpen } = req.body;
-
-  try {
-    if (isOpen) {
-      await db.run("UPDATE rounds SET is_open = 0");
-      await db.run("UPDATE rounds SET is_open = 1 WHERE round_number = ?", [roundNumber]);
-    } else {
-      await db.run("UPDATE rounds SET is_open = 0 WHERE round_number = ?", [roundNumber]);
+    if (result.rows.length === 0) {
+      res
+        .status(401)
+        .json({ error: "아이디 또는 비밀번호가 올바르지 않습니다." });
+      return;
     }
-
-    const rounds = await db.query("SELECT * FROM rounds ORDER BY round_number ASC");
-    res.json({ success: true, rounds });
-  } catch (err: any) {
-    console.error("[ADMIN rounds toggle]", err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ✅ 트랜잭션 추가 — 삭제 도중 오류 시 부분 삭제 방지
-app.post("/api/admin/clear-data", authenticate, authorize(["admin"]), async (_req, res) => {
-  const client = await pgPool.connect();
-  try {
-    await client.query("BEGIN");
-    await client.query("DELETE FROM work_images");
-    await client.query("DELETE FROM works");
-    await client.query("DELETE FROM evaluations");
-    await client.query("DELETE FROM proposals");
-    await client.query("DELETE FROM users WHERE role != 'admin'");
-    await client.query("COMMIT");
-    res.json({ success: true });
-  } catch (err: any) {
-    await client.query("ROLLBACK");
-    console.error("[ADMIN clear-data]", err);
-    res.status(500).json({ error: "데이터 초기화 실패: " + err.message });
-  } finally {
-    client.release();
-  }
-});
-
-app.post("/api/admin/seed", authenticate, authorize(["admin"]), async (_req, res) => {
-  try {
-    await db.run("DELETE FROM work_images");
-    await db.run("DELETE FROM works");
-    await db.run("DELETE FROM evaluations");
-    await db.run("DELETE FROM proposals");
-    await db.run("DELETE FROM users WHERE role != 'admin'");
-
-    const insertUserSql = "INSERT INTO users (username, password, role, name, student_id, needs_password_change, initial_password) VALUES (?, ?, ?, ?, ?, ?, ?)";
-    const judges: Array<{ id: string; name: string }> = [];
-    const judgeLastNames = ["김", "이", "박", "최", "정"];
-
-    for (let i = 1; i <= 5; i++) {
-      const username = `judge${String(i).padStart(2, "0")}`;
-      const name = `${judgeLastNames[i - 1]}교수`;
-      await db.run(insertUserSql, [username, hashPassword(username), "judge", name, null, 1, username]);
-      const judge = await db.get("SELECT id FROM users WHERE username = ?", [username]) as any;
-      judges.push({ id: judge.id, name });
+    const user = result.rows[0];
+    const valid = await bcrypt.compare(password, user.password);
+    if (!valid) {
+      res
+        .status(401)
+        .json({ error: "아이디 또는 비밀번호가 올바르지 않습니다." });
+      return;
     }
+    const token = jwt.sign(
+      { id: user.id, username: user.username, role: user.role, name: user.name },
+      JWT_SECRET,
+      { expiresIn: "8h" }
+    );
+    res
+      .cookie("token", token, {
+        httpOnly: true,
+        sameSite: "lax",
+        maxAge: 8 * 60 * 60 * 1000,
+      })
+      .json({
+        id: user.id,
+        username: user.username,
+        role: user.role,
+        name: user.name,
+      });
+  } catch {
+    res.status(500).json({ error: "로그인 처리 중 오류가 발생했습니다." });
+  }
+});
 
-    for (let i = 1; i <= 10; i++) {
-      const studentId = `2024${String(i).padStart(4, "0")}`;
-      const name = ["홍길동", "김철수", "이영희", "박민수", "최수진", "오세훈", "한지민", "강서연", "윤도현", "정민아"][i - 1] || `학생${i}`;
-      await db.run(insertUserSql, [studentId, hashPassword(studentId), "student", name, studentId, 1, studentId]);
-      const user = await db.get("SELECT id FROM users WHERE username = ?", [studentId]) as any;
-      const userId = user.id;
+app.post("/api/auth/logout", (_req: Request, res: Response) => {
+  res.clearCookie("token").json({ success: true });
+});
 
-      for (let roundNum = 1; roundNum <= 3; roundNum++) {
-        await db.run(
-          `INSERT INTO proposals (user_id, round_number, student_id, name, career_path, title, author, genre, plot, subject, reason, is_submitted, presentation_order, is_participating)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [userId, roundNum, studentId, name, "공간 연출가", `졸업작품 ${i}`, "본인", "공연/전시",
-           `${name}의 ${roundNum}차 줄거리`, `${name}의 ${roundNum}차 주제`, `${name}의 ${roundNum}차 기획의도`, 1, i, 1]
-        );
+app.get(
+  "/api/health",
+  authMiddleware,
+  (req: AuthenticatedRequest, res: Response) => {
+    res.json(req.user);
+  }
+);
 
-        const proposal = await db.get("SELECT id FROM proposals WHERE user_id = ? AND round_number = ?", [userId, roundNum]) as any;
-        const proposalId = proposal.id;
+// ──────────────────────────────────────────────
+// 9. 관리자: 사용자 CRUD
+// ──────────────────────────────────────────────
+app.get(
+  "/api/admin/users",
+  authMiddleware,
+  adminMiddleware,
+  async (_req: Request, res: Response) => {
+    try {
+      const result = await db.query(
+        `SELECT id, username, name, role, department, student_id, created_at
+         FROM users
+         ORDER BY created_at ASC`
+      );
+      res.json(result.rows);
+    } catch {
+      res.status(500).json({ error: "사용자 목록 조회에 실패했습니다." });
+    }
+  }
+);
 
-        for (let j = 1; j <= 3; j++) {
-          await db.run(
-            `INSERT INTO works (proposal_id, work_number, title, category, summary, keywords, purpose, effect)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-            [proposalId, j, `작품 ${j}`, "공간설계", `${name}의 작품 ${j} 요약`, "공간,무대,연출", "졸업작품 구현", "공간적 효과 제안"]
-          );
-
-          const work = await db.get("SELECT id FROM works WHERE proposal_id = ? AND work_number = ?", [proposalId, j]) as any;
-          await db.run("INSERT INTO work_images (work_id, url) VALUES (?, ?)", [work.id, `https://picsum.photos/seed/${studentId}-${roundNum}-${j}/800/600`]);
-        }
-
-        for (const judge of judges) {
-          await db.run(
-            `INSERT INTO evaluations (proposal_id, judge_id, text_grade, work1_grade, work2_grade, work3_grade, comment, is_final, finalized_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, now())
-             ON CONFLICT (proposal_id, judge_id) DO UPDATE SET
-               text_grade = EXCLUDED.text_grade, work1_grade = EXCLUDED.work1_grade,
-               work2_grade = EXCLUDED.work2_grade, work3_grade = EXCLUDED.work3_grade,
-               comment = EXCLUDED.comment, is_final = true, finalized_at = now()`,
-            [proposalId, judge.id, randomGrade(), randomGrade(), randomGrade(), randomGrade(),
-             `${roundNum}차 심사평: ${name}의 작품은 인상적입니다. (by ${judge.name})`, true]
-          );
-        }
+app.post(
+  "/api/admin/users",
+  authMiddleware,
+  adminMiddleware,
+  async (req: Request, res: Response) => {
+    const { username, password, name, role, department, student_id } =
+      req.body as Record<string, string>;
+    if (!username || !password || !name || !role) {
+      res
+        .status(400)
+        .json({ error: "필수 항목(username, password, name, role)을 입력하세요." });
+      return;
+    }
+    try {
+      const hashed = await hashPassword(password);
+      const result = await db.query(
+        `INSERT INTO users (username, password, name, role, department, student_id)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         RETURNING id, username, name, role, department, student_id, created_at`,
+        [
+          username.trim(),
+          hashed,
+          name.trim(),
+          role,
+          department ?? null,
+          student_id ?? null,
+        ]
+      );
+      res.status(201).json(result.rows[0]);
+    } catch (err: any) {
+      if (err.code === "23505") {
+        res.status(409).json({ error: "이미 존재하는 아이디입니다." });
+      } else {
+        res.status(500).json({ error: "사용자 생성에 실패했습니다." });
       }
     }
-
-    res.json({ success: true });
-  } catch (err: any) {
-    console.error("[ADMIN seed]", err);
-    res.status(500).json({ error: err.message });
   }
-});
+);
 
-app.post("/api/admin/users", authenticate, authorize(["admin"]), async (req, res) => {
-  const { username, name, role, student_id } = req.body;
-  try {
-    await db.run(
-      "INSERT INTO users (username, password, role, name, student_id, needs_password_change, initial_password) VALUES (?, ?, ?, ?, ?, 1, ?)",
-      [username, hashPassword(username), role, name, student_id || null, username]
-    );
-    res.json({ success: true });
-  } catch (err: any) {
-    console.error("[ADMIN users create]", err);
-    res.status(400).json({ error: "이미 존재하는 아이디입니다." });
+app.put(
+  "/api/admin/users/:id",
+  authMiddleware,
+  adminMiddleware,
+  async (req: Request, res: Response) => {
+    const { id } = req.params;
+    const { name, role, department, student_id, password } =
+      req.body as Record<string, string>;
+    try {
+      if (password) {
+        const hashed = await hashPassword(password);
+        await db.query(
+          `UPDATE users
+           SET name=$1, role=$2, department=$3, student_id=$4, password=$5
+           WHERE id=$6`,
+          [name, role, department ?? null, student_id ?? null, hashed, id]
+        );
+      } else {
+        await db.query(
+          `UPDATE users
+           SET name=$1, role=$2, department=$3, student_id=$4
+           WHERE id=$5`,
+          [name, role, department ?? null, student_id ?? null, id]
+        );
+      }
+      const updated = await db.query(
+        `SELECT id, username, name, role, department, student_id, created_at
+         FROM users WHERE id = $1`,
+        [id]
+      );
+      if (updated.rows.length === 0) {
+        res.status(404).json({ error: "사용자를 찾을 수 없습니다." });
+        return;
+      }
+      res.json(updated.rows[0]);
+    } catch {
+      res.status(500).json({ error: "사용자 수정에 실패했습니다." });
+    }
   }
-});
+);
 
-app.post("/api/admin/users/reset-password", authenticate, authorize(["admin"]), async (req, res) => {
-  const { userId } = req.body;
-  const user = await db.get("SELECT username FROM users WHERE id = ?", [userId]) as any;
-  if (user) {
-    await db.run("UPDATE users SET password = ?, needs_password_change = 1 WHERE id = ?", [hashPassword(user.username), userId]);
-    res.json({ success: true });
-  } else {
-    res.status(404).json({ error: "사용자를 찾을 수 없습니다." });
+app.delete(
+  "/api/admin/users/:id",
+  authMiddleware,
+  adminMiddleware,
+  async (req: Request, res: Response) => {
+    const { id } = req.params;
+    try {
+      await db.query("DELETE FROM users WHERE id = $1", [id]);
+      res.json({ success: true });
+    } catch {
+      res.status(500).json({ error: "사용자 삭제에 실패했습니다." });
+    }
   }
-});
+);
 
-app.delete("/api/admin/users/:id", authenticate, authorize(["admin"]), async (req, res) => {
-  const userId = req.params.id;
+// 대량 사용자 생성 (트랜잭션)
+app.post(
+  "/api/admin/users/bulk",
+  authMiddleware,
+  adminMiddleware,
+  async (req: Request, res: Response) => {
+    const users = req.body as Array<{
+      username: string;
+      password: string;
+      name: string;
+      role: string;
+      department?: string;
+      student_id?: string;
+    }>;
+    if (!Array.isArray(users) || users.length === 0) {
+      res.status(400).json({ error: "사용자 배열이 필요합니다." });
+      return;
+    }
+    const client = await db.connect();
+    try {
+      await client.query("BEGIN");
+      const created: unknown[] = [];
+      for (const u of users) {
+        if (!u.username || !u.password || !u.name || !u.role) continue;
+        const hashed = await hashPassword(u.password);
+        const result = await client.query(
+          `INSERT INTO users (username, password, name, role, department, student_id)
+           VALUES ($1, $2, $3, $4, $5, $6)
+           ON CONFLICT (username) DO NOTHING
+           RETURNING id, username, name, role, department, student_id`,
+          [
+            u.username.trim(),
+            hashed,
+            u.name.trim(),
+            u.role,
+            u.department ?? null,
+            u.student_id ?? null,
+          ]
+        );
+        if (result.rows.length > 0) created.push(result.rows[0]);
+      }
+      await client.query("COMMIT");
+      res.status(201).json({ created: created.length, users: created });
+    } catch {
+      await client.query("ROLLBACK");
+      res.status(500).json({ error: "대량 사용자 생성에 실패했습니다." });
+    } finally {
+      client.release();
+    }
+  }
+);
 
-  try {
-    const user = await db.get("SELECT username, role FROM users WHERE id = ?", [userId]) as any;
-    if (!user) return res.status(404).json({ error: "사용자를 찾을 수 없습니다." });
-    if (user.username === "admin") return res.status(403).json({ error: "관리자 계정은 삭제할 수 없습니다." });
+// ──────────────────────────────────────────────
+// 10. 관리자: 라운드 CRUD
+// ──────────────────────────────────────────────
+app.get(
+  "/api/admin/rounds",
+  authMiddleware,
+  adminMiddleware,
+  async (_req: Request, res: Response) => {
+    try {
+      const result = await db.query(
+        "SELECT * FROM rounds ORDER BY round_number ASC"
+      );
+      res.json(result.rows);
+    } catch {
+      res.status(500).json({ error: "라운드 목록 조회에 실패했습니다." });
+    }
+  }
+);
 
-    // ✅ ANY($1::uuid[]) 패턴 사용 — 동적 placeholders 대신 안전하고 간결하게
-    const userProposals = await db.query("SELECT id FROM proposals WHERE user_id = ?", [userId]) as any[];
-    const proposalIds = userProposals.map((p: any) => p.id);
+app.post(
+  "/api/admin/rounds",
+  authMiddleware,
+  adminMiddleware,
+  async (req: Request, res: Response) => {
+    const { round_number, name, is_active } = req.body as {
+      round_number?: number;
+      name?: string;
+      is_active?: boolean;
+    };
+    if (round_number === undefined) {
+      res.status(400).json({ error: "round_number가 필요합니다." });
+      return;
+    }
+    try {
+      const result = await db.query(
+        `INSERT INTO rounds (round_number, name, is_active)
+         VALUES ($1, $2, $3)
+         RETURNING *`,
+        [
+          round_number,
+          name ?? `${round_number}차 심사`,
+          normalizeBoolean(is_active),
+        ]
+      );
+      res.status(201).json(result.rows[0]);
+    } catch (err: any) {
+      if (err.code === "23505") {
+        res.status(409).json({ error: "이미 존재하는 라운드 번호입니다." });
+      } else {
+        res.status(500).json({ error: "라운드 생성에 실패했습니다." });
+      }
+    }
+  }
+);
 
-    if (proposalIds.length > 0) {
-      const workRows = await pgPool.query(
-        `SELECT id FROM works WHERE proposal_id = ANY($1::uuid[])`,
+app.patch(
+  "/api/admin/rounds/:id/toggle",
+  authMiddleware,
+  adminMiddleware,
+  async (req: Request, res: Response) => {
+    const { id } = req.params;
+    try {
+      const current = await db.query(
+        "SELECT id, is_active FROM rounds WHERE id = $1",
+        [id]
+      );
+      if (current.rows.length === 0) {
+        res.status(404).json({ error: "라운드를 찾을 수 없습니다." });
+        return;
+      }
+      const updated = await db.query(
+        "UPDATE rounds SET is_active = $1 WHERE id = $2 RETURNING *",
+        [!current.rows[0].is_active, id]
+      );
+      res.json(updated.rows[0]);
+    } catch {
+      res.status(500).json({ error: "라운드 토글에 실패했습니다." });
+    }
+  }
+);
+
+app.delete(
+  "/api/admin/rounds/:id",
+  authMiddleware,
+  adminMiddleware,
+  async (req: Request, res: Response) => {
+    const { id } = req.params;
+    try {
+      await db.query("DELETE FROM rounds WHERE id = $1", [id]);
+      res.json({ success: true });
+    } catch {
+      res.status(500).json({ error: "라운드 삭제에 실패했습니다." });
+    }
+  }
+);
+
+// ──────────────────────────────────────────────
+// 11. 관리자: 통계 (N+1 해소 – JOIN + ANY)
+// ──────────────────────────────────────────────
+app.get(
+  "/api/admin/stats/:roundNumber",
+  authMiddleware,
+  adminMiddleware,
+  async (req: Request, res: Response) => {
+    const roundNumber = parseInt(req.params.roundNumber, 10);
+    if (isNaN(roundNumber)) {
+      res.status(400).json({ error: "유효한 roundNumber가 필요합니다." });
+      return;
+    }
+    try {
+      // 1) 해당 라운드의 모든 기획안 조회
+      const proposalsResult = await db.query(
+        `SELECT p.id, p.title, p.is_final,
+                u.id AS student_id, u.name AS student_name, u.student_id AS student_no
+         FROM proposals p
+         JOIN users u ON u.id = p.student_id
+         WHERE p.round_number = $1
+         ORDER BY u.name ASC`,
+        [roundNumber]
+      );
+      const proposals = proposalsResult.rows;
+      if (proposals.length === 0) {
+        res.json([]);
+        return;
+      }
+
+      const proposalIds = proposals.map((p) => p.id);
+
+      // 2) 모든 평가를 한 번에 조회 (N+1 제거)
+      const evaluationsResult = await db.query(
+        `SELECT e.proposal_id, e.judge_id, e.scores, e.total_score, e.is_final,
+                u.name AS judge_name
+         FROM evaluations e
+         JOIN users u ON u.id = e.judge_id
+         WHERE e.proposal_id = ANY($1::uuid[])`,
         [proposalIds]
       );
-      const workIds = workRows.rows.map((w: any) => w.id);
 
-      if (workIds.length > 0) {
-        await pgPool.query(`DELETE FROM work_images WHERE work_id = ANY($1::uuid[])`, [workIds]);
+      // 3) proposal_id 기준 Map 구성
+      const evalMap = new Map<string, typeof evaluationsResult.rows>();
+      for (const e of evaluationsResult.rows) {
+        if (!evalMap.has(e.proposal_id)) evalMap.set(e.proposal_id, []);
+        evalMap.get(e.proposal_id)!.push(e);
       }
-      await pgPool.query(`DELETE FROM works WHERE proposal_id = ANY($1::uuid[])`, [proposalIds]);
-      await pgPool.query(`DELETE FROM evaluations WHERE proposal_id = ANY($1::uuid[])`, [proposalIds]);
-    }
 
-    await db.run("DELETE FROM proposals WHERE user_id = ?", [userId]);
-    await db.run("DELETE FROM evaluations WHERE judge_id = ?", [userId]);
-    const result = await db.run("DELETE FROM users WHERE id = ?", [userId]);
-
-    if (result.changes > 0) {
-      res.json({ success: true });
-    } else {
-      res.status(404).json({ error: "삭제할 사용자를 찾지 못했습니다." });
-    }
-  } catch (err: any) {
-    console.error("[ADMIN] Delete user error:", err);
-    res.status(500).json({ error: "사용자 삭제 중 오류가 발생했습니다: " + err.message });
-  }
-});
-
-// Student API
-app.post("/api/proposals", authenticate, authorize(["student", "admin"]), async (req: any, res) => {
-  const { userId, roundNumber, studentId, name, careerPath, title, author, genre, plot, subject, reason, works, is_submitted } = req.body;
-
-  if (req.user.role === "student" && req.user.id !== userId) {
-    return res.status(403).json({ error: "권한이 없습니다." });
-  }
-
-  const round = await db.get("SELECT is_open FROM rounds WHERE round_number = ?", [roundNumber]) as any;
-  if (!round || !Number(round.is_open)) {
-    return res.status(403).json({ error: "현재 심사 기간이 아닙니다." });
-  }
-
-  const existingProposal = await db.get(
-    "SELECT id, presentation_order, is_participating FROM proposals WHERE user_id = ? AND round_number = ?",
-    [userId, roundNumber]
-  ) as any;
-
-  try {
-    const isSubmittedValue = normalizeBoolInt(is_submitted);
-    let proposalId: string;
-
-    if (existingProposal) {
-      proposalId = existingProposal.id;
-
-      await db.run(
-        `UPDATE proposals
-         SET student_id = ?, name = ?, career_path = ?, title = ?, author = ?, genre = ?,
-             plot = ?, subject = ?, reason = ?, is_submitted = ?
-         WHERE id = ?`,
-        [studentId, name, careerPath, title, author, genre, plot, subject, reason, isSubmittedValue, proposalId]
-      );
-
-      const workIds = await db.query("SELECT id FROM works WHERE proposal_id = ?", [proposalId]) as any[];
-      if (workIds.length > 0) {
-        await pgPool.query(
-          `DELETE FROM work_images WHERE work_id = ANY($1::uuid[])`,
-          [workIds.map((w: any) => w.id)]
-        );
-      }
-      await db.run("DELETE FROM works WHERE proposal_id = ?", [proposalId]);
-    } else {
-      await db.run(
-        `INSERT INTO proposals (user_id, round_number, student_id, name, career_path, title, author, genre, plot, subject, reason, is_submitted, presentation_order, is_participating)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [userId, roundNumber, studentId, name, careerPath, title, author, genre, plot, subject, reason, isSubmittedValue, 0, 0]
-      );
-
-      const proposal = await db.get(
-        "SELECT id FROM proposals WHERE user_id = ? AND round_number = ?",
-        [userId, roundNumber]
-      ) as any;
-
-      proposalId = proposal.id;
-    }
-
-    for (const work of normalizeWorks(works)) {
-      await db.run(
-        `INSERT INTO works (proposal_id, work_number, title, category, summary, keywords, purpose, effect)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [proposalId, work.workNumber, work.title, work.category, work.summary, work.keywords, work.purpose, work.effect]
-      );
-
-      const workData = await db.get(
-        "SELECT id FROM works WHERE proposal_id = ? AND work_number = ?",
-        [proposalId, work.workNumber]
-      ) as any;
-
-      for (const imgUrl of work.images) {
-        await db.run("INSERT INTO work_images (work_id, url) VALUES (?, ?)", [workData.id, imgUrl]);
-      }
-    }
-
-    res.json({ success: true, id: proposalId });
-  } catch (err: any) {
-    console.error("[PROPOSALS save]", err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get("/api/proposals/my/:userId/:roundNumber", authenticate, async (req: any, res) => {
-  if (req.user.role === "student" && req.user.id !== req.params.userId) {
-    return res.status(403).json({ error: "권한이 없습니다." });
-  }
-
-  const proposal = await db.get(
-    "SELECT * FROM proposals WHERE user_id = ? AND round_number = ?",
-    [req.params.userId, req.params.roundNumber]
-  ) as any;
-
-  if (proposal) {
-    const works = await db.query("SELECT * FROM works WHERE proposal_id = ? ORDER BY work_number ASC", [proposal.id]) as any[];
-    for (const work of works) {
-      const images = await db.query("SELECT url FROM work_images WHERE work_id = ?", [work.id]) as any[];
-      work.images = images.map((i: any) => i.url);
-    }
-
-    const evals = await db.query("SELECT is_final FROM evaluations WHERE proposal_id = ?", [proposal.id]) as any[];
-    const isEvaluated = Array.isArray(evals)
-      ? evals.some((e: any) => e.is_final === true || e.is_final === 1 || e.is_final === "1")
-      : false;
-
-    res.json({ ...proposal, works, is_evaluated: isEvaluated });
-  } else {
-    res.json(null);
-  }
-});
-
-app.get("/api/proposals/reference/:userId/:roundNumber", authenticate, async (req: any, res) => {
-  const { userId, roundNumber } = req.params;
-
-  if (req.user.role === "student" && req.user.id !== userId) {
-    return res.status(403).json({ error: "권한이 없습니다." });
-  }
-
-  try {
-    const proposal = await db.get(
-      "SELECT * FROM proposals WHERE user_id = ? AND round_number = ?",
-      [userId, roundNumber]
-    ) as any;
-
-    if (!proposal) return res.json(null);
-
-    const works = await db.query(
-      "SELECT * FROM works WHERE proposal_id = ? ORDER BY work_number ASC",
-      [proposal.id]
-    ) as any[];
-
-    for (const work of works) {
-      const images = await db.query("SELECT url FROM work_images WHERE work_id = ?", [work.id]) as any[];
-      work.images = images.map((i: any) => i.url);
-    }
-
-    res.json({ ...proposal, works });
-  } catch (err: any) {
-    console.error("[REFERENCE proposal]", err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Judge API
-app.get("/api/students/:roundNumber", authenticate, authorize(["judge", "admin"]), async (req: any, res) => {
-  const judgeId = String(req.query.judgeId || "");
-  if (req.user.role === "judge" && req.user.id !== judgeId) {
-    return res.status(403).json({ error: "권한이 없습니다." });
-  }
-
-  const students = await db.query(
-    `SELECT p.*, u.name as student_name,
-     (SELECT COUNT(*)::int FROM evaluations ev WHERE ev.proposal_id = p.id) as total_eval_count,
-     (SELECT COUNT(*)::int FROM evaluations ev WHERE ev.proposal_id = p.id AND ev.judge_id = ?) as my_eval_count,
-     e.text_grade as my_text_grade, e.work1_grade as my_work1_grade,
-     e.work2_grade as my_work2_grade, e.work3_grade as my_work3_grade,
-     e.is_final as my_is_final
-     FROM proposals p
-     JOIN users u ON p.user_id = u.id
-     LEFT JOIN evaluations e ON e.proposal_id = p.id AND e.judge_id = ?
-     WHERE p.round_number = ? AND p.is_participating = 1
-     ORDER BY p.presentation_order ASC, p.created_at ASC`,
-    [judgeId, judgeId, req.params.roundNumber]
-  );
-  res.json(students);
-});
-
-app.get("/api/proposals/:id", authenticate, async (req: any, res) => {
-  const judgeId = req.query.judgeId ? String(req.query.judgeId) : null;
-
-  if (req.user.role === "judge" && req.user.id !== judgeId) {
-    return res.status(403).json({ error: "권한이 없습니다." });
-  }
-
-  const proposal = await db.get("SELECT * FROM proposals WHERE id = ?", [req.params.id]) as any;
-  if (!proposal) return res.status(404).json({ error: "Not found" });
-
-  if (req.user.role === "student" && req.user.id !== proposal.user_id) {
-    return res.status(403).json({ error: "권한이 없습니다." });
-  }
-
-  proposal.careerPath = proposal.career_path;
-  proposal.studentId = proposal.student_id;
-
-  const works = await db.query("SELECT * FROM works WHERE proposal_id = ? ORDER BY work_number ASC", [proposal.id]) as any[];
-  for (const work of works) {
-    const images = await db.query("SELECT url FROM work_images WHERE work_id = ?", [work.id]) as any[];
-    work.images = images.map((i: any) => i.url);
-  }
-
-  let evals: any[] = [];
-  if (req.user.role === "admin") {
-    evals = await db.query(
-      `SELECT e.*, u.name as judge_name FROM evaluations e JOIN users u ON e.judge_id = u.id WHERE e.proposal_id = ?`,
-      [proposal.id]
-    );
-  } else if (req.user.role === "judge") {
-    evals = await db.query(
-      `SELECT e.*, u.name as judge_name FROM evaluations e JOIN users u ON e.judge_id = u.id WHERE e.proposal_id = ? AND e.judge_id = ?`,
-      [proposal.id, req.user.id]
-    );
-  }
-
-  res.json({ ...proposal, works, evaluations: evals });
-});
-
-app.post("/api/evaluations", authenticate, authorize(["judge", "admin"]), async (req: any, res) => {
-  if (req.user.role === "admin") {
-    return res.status(403).json({ error: "관리자는 평가를 저장하거나 수정할 수 없습니다." });
-  }
-
-  const proposalId = req.body.proposalId ?? req.body.proposal_id;
-  const judgeId = req.user?.id ?? req.body.judgeId ?? req.body.judge_id;
-  const text_grade = req.body.text_grade;
-  const work1_grade = req.body.work1_grade;
-  const work2_grade = req.body.work2_grade;
-  const work3_grade = req.body.work3_grade;
-  const comment = req.body.comment;
-  const is_final = normalizeIsFinal(req.body.is_final ?? req.body.isFinal, true);
-
-  if (!proposalId || !judgeId) {
-    return res.status(400).json({ error: "proposal 또는 judge 정보가 없습니다." });
-  }
-
-  if (!text_grade || !work1_grade || !work2_grade || !work3_grade) {
-    return res.status(400).json({ error: "4개 항목을 모두 입력해야 저장할 수 있습니다." });
-  }
-
-  if (req.user.role === "judge" && req.user.id !== judgeId) {
-    return res.status(403).json({ error: "권한이 없습니다." });
-  }
-
-  try {
-    // ✅ is_final 파라미터 바인딩 안정화 — CASE WHEN ? = true 대신 서버에서 직접 계산
-    const finalizedAtSql = is_final ? "now()" : "NULL";
-
-    await pgPool.query(
-      `INSERT INTO evaluations (
-        proposal_id, judge_id, text_grade, work1_grade, work2_grade, work3_grade, comment, is_final, finalized_at
-      )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, ${finalizedAtSql})
-      ON CONFLICT (proposal_id, judge_id) DO UPDATE SET
-        text_grade  = CASE WHEN evaluations.is_final = true THEN evaluations.text_grade  ELSE EXCLUDED.text_grade  END,
-        work1_grade = CASE WHEN evaluations.is_final = true THEN evaluations.work1_grade ELSE EXCLUDED.work1_grade END,
-        work2_grade = CASE WHEN evaluations.is_final = true THEN evaluations.work2_grade ELSE EXCLUDED.work2_grade END,
-        work3_grade = CASE WHEN evaluations.is_final = true THEN evaluations.work3_grade ELSE EXCLUDED.work3_grade END,
-        comment     = CASE WHEN evaluations.is_final = true THEN evaluations.comment     ELSE EXCLUDED.comment     END,
-        is_final    = CASE WHEN evaluations.is_final = true THEN true ELSE EXCLUDED.is_final END,
-        finalized_at = CASE
-          WHEN evaluations.is_final = true THEN evaluations.finalized_at
-          WHEN EXCLUDED.is_final = true THEN ${finalizedAtSql}
-          ELSE NULL
-        END`,
-      [proposalId, judgeId, text_grade, work1_grade, work2_grade, work3_grade, comment, is_final]
-    );
-
-    res.json({ success: true });
-  } catch (err: any) {
-    console.error("[EVALUATIONS save]", err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.delete("/api/evaluations/:proposalId/:judgeId", authenticate, authorize(["judge", "admin"]), async (req: any, res) => {
-  const { proposalId, judgeId } = req.params;
-
-  if (req.user.role === "judge" && req.user.id !== judgeId) {
-    return res.status(403).json({ error: "권한이 없습니다." });
-  }
-
-  try {
-    const evaluation = await db.get(
-      `SELECT e.*, p.student_id, p.name, p.round_number
-       FROM evaluations e
-       JOIN proposals p ON e.proposal_id = p.id
-       WHERE e.proposal_id = ? AND e.judge_id = ?`,
-      [proposalId, judgeId]
-    ) as any;
-
-    if (!evaluation) return res.status(404).json({ error: "삭제할 평가를 찾을 수 없습니다." });
-
-    if (req.user.role === "judge" && evaluation.is_final) {
-      return res.status(403).json({ error: "최종 확정된 평가는 삭제할 수 없습니다." });
-    }
-
-    await db.run(
-      "DELETE FROM evaluations WHERE proposal_id = ? AND judge_id = ?",
-      [proposalId, judgeId]
-    );
-
-    console.log("[ADMIN/JUDGE DELETE EVALUATION]", {
-      deletedBy: req.user.id,
-      deletedByRole: req.user.role,
-      proposalId,
-      judgeId,
-      studentId: evaluation.student_id,
-      studentName: evaluation.name,
-      roundNumber: evaluation.round_number,
-      deletedAt: new Date().toISOString(),
-    });
-
-    res.json({ success: true });
-  } catch (err: any) {
-    console.error("[DELETE EVALUATION ERROR]", err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.delete("/api/admin/proposals/:proposalId/reset", authenticate, authorize(["admin"]), async (req: any, res) => {
-  const { proposalId } = req.params;
-
-  try {
-    const proposal = await db.get(`SELECT * FROM proposals WHERE id = ?`, [proposalId]) as any;
-    if (!proposal) return res.status(404).json({ error: "초기화할 기획안을 찾을 수 없습니다." });
-
-    const works = await db.query(`SELECT id FROM works WHERE proposal_id = ?`, [proposalId]) as any[];
-    const workIds = works.map((w: any) => w.id);
-
-    await db.run(`DELETE FROM evaluations WHERE proposal_id = ?`, [proposalId]);
-
-    // ✅ ANY($1::uuid[]) 패턴 사용
-    if (workIds.length > 0) {
-      await pgPool.query(`DELETE FROM work_images WHERE work_id = ANY($1::uuid[])`, [workIds]);
-    }
-
-    await db.run(`DELETE FROM works WHERE proposal_id = ?`, [proposalId]);
-    await db.run(`DELETE FROM proposals WHERE id = ?`, [proposalId]);
-
-    console.log("[ADMIN RESET PROPOSAL]", {
-      adminId: req.user.id,
-      proposalId,
-      studentId: proposal.student_id,
-      studentName: proposal.name,
-      roundNumber: proposal.round_number,
-      deletedAt: new Date().toISOString(),
-    });
-
-    res.json({ success: true });
-  } catch (err: any) {
-    console.error("[ADMIN RESET PROPOSAL ERROR]", err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post("/api/admin/presentation-order", authenticate, authorize(["admin"]), async (req, res) => {
-  const { orders } = req.body;
-
-  try {
-    for (const item of orders) {
-      if (item.proposalId) {
-        await db.run("UPDATE proposals SET presentation_order = ?, is_participating = ? WHERE id = ?",
-          [item.order, item.isParticipating ? 1 : 0, item.proposalId]);
-      } else if (item.userId && item.roundNumber) {
-        const user = await db.get("SELECT id, student_id, name FROM users WHERE id = ?", [item.userId]) as any;
-        if (!user) continue;
-
-        await db.run(
-          `INSERT INTO proposals (user_id, round_number, student_id, name, is_participating, presentation_order)
-           VALUES (?, ?, ?, ?, ?, ?)
-           ON CONFLICT (user_id, round_number) DO NOTHING`,
-          [item.userId, item.roundNumber, user.student_id, user.name, item.isParticipating ? 1 : 0, item.order]
-        );
-
-        await db.run(
-          `UPDATE proposals SET is_participating = ?, presentation_order = ? WHERE user_id = ? AND round_number = ?`,
-          [item.isParticipating ? 1 : 0, item.order, item.userId, item.roundNumber]
-        );
-      }
-    }
-    res.json({ success: true });
-  } catch (err: any) {
-    console.error("[ADMIN] Presentation order error:", err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ✅ N+1 쿼리 최적화 — 학생 수만큼 개별 쿼리 대신 한 번에 JOIN으로 가져온 뒤 Map으로 그룹핑
-app.get("/api/admin/stats/:roundNumber", authenticate, authorize(["admin"]), async (req, res) => {
-  const roundNum = req.params.roundNumber;
-
-  const students = await db.query(
-    `SELECT u.id as user_id, u.student_id, u.name, p.id as proposal_id, p.title,
-     p.is_submitted, p.presentation_order, p.is_participating
-     FROM users u
-     LEFT JOIN proposals p ON u.id = p.user_id AND p.round_number = ?
-     WHERE u.role = 'student'
-     ORDER BY COALESCE(p.presentation_order, 999999), u.student_id NULLS LAST, u.created_at ASC`,
-    [roundNum]
-  ) as any[];
-
-  const proposalIds = students.filter(s => s.proposal_id).map(s => s.proposal_id);
-
-  // ✅ 평가 전체를 한 번에 가져와 Map으로 그룹핑
-  let evalsByProposalId = new Map<string, any[]>();
-  if (proposalIds.length > 0) {
-    const allEvals = await pgPool.query(
-      `SELECT e.text_grade, e.work1_grade, e.work2_grade, e.work3_grade,
-              e.comment, e.is_final, e.proposal_id, u.name as judge_name
-       FROM evaluations e
-       JOIN users u ON e.judge_id = u.id
-       WHERE e.proposal_id = ANY($1::uuid[])`,
-      [proposalIds]
-    );
-
-    for (const row of allEvals.rows) {
-      const list = evalsByProposalId.get(row.proposal_id) ?? [];
-      list.push(row);
-      evalsByProposalId.set(row.proposal_id, list);
+      // 4) 통계 조합
+      const stats = proposals.map((p) => {
+        const evals = evalMap.get(p.id) ?? [];
+        const scoredEvals = evals.filter((e) => e.total_score != null);
+        const avgScore =
+          scoredEvals.length > 0
+            ? roundTwo(average(scoredEvals.map((e) => parseFloat(e.total_score))))
+            : null;
+
+        return {
+          proposalId: p.id,
+          proposalTitle: p.title,
+          isFinal: p.is_final,
+          studentId: p.student_id,
+          studentName: p.student_name,
+          studentNo: p.student_no,
+          evaluationCount: evals.length,
+          finalEvaluationCount: evals.filter((e) => e.is_final).length,
+          averageScore: avgScore,
+          judges: evals.map((e) => ({
+            judgeId: e.judge_id,
+            judgeName: e.judge_name,
+            totalScore:
+              e.total_score != null ? parseFloat(e.total_score) : null,
+            isFinal: e.is_final,
+          })),
+        };
+      });
+
+      res.json(stats);
+    } catch {
+      res.status(500).json({ error: "통계 조회에 실패했습니다." });
     }
   }
+);
 
-  const isFinalTrue = (value: any) => value === true || value === 1 || value === "1";
-
-  const stats = students.map(s => {
-    if (!s.proposal_id) {
-      return {
-        id: null, user_id: s.user_id, student_id: s.student_id, name: s.name,
-        title: "미제출", is_submitted: 0, is_participating: 0, presentation_order: 0,
-        evaluations: [], averageScore: "0.00",
-        avgText: "0.00", avgWork1: "0.00", avgWork2: "0.00", avgWork3: "0.00",
-      };
-    }
-
-    const evals = evalsByProposalId.get(s.proposal_id) ?? [];
-
-    const finalizedEvals = evals.filter((e: any) =>
-      isFinalTrue(e.is_final) && e.text_grade && e.work1_grade && e.work2_grade && e.work3_grade
-    );
-
-    const processedEvals = finalizedEvals.map((e: any) => {
-      const st = scoreOrNull(e.text_grade);
-      const s1 = scoreOrNull(e.work1_grade);
-      const s2 = scoreOrNull(e.work2_grade);
-      const s3 = scoreOrNull(e.work3_grade);
-      return { ...e, scores: { text: st, work1: s1, work2: s2, work3: s3 }, totalScore: average([st, s1, s2, s3]) };
-    });
-
-    const avgText  = average(processedEvals.map((e: any) => e.scores.text));
-    const avgWork1 = average(processedEvals.map((e: any) => e.scores.work1));
-    const avgWork2 = average(processedEvals.map((e: any) => e.scores.work2));
-    const avgWork3 = average(processedEvals.map((e: any) => e.scores.work3));
-    const avgTotal = average([avgText, avgWork1, avgWork2, avgWork3]);
-
-    return {
-      id: s.proposal_id, user_id: s.user_id, student_id: s.student_id, name: s.name,
-      title: s.title || "제목 없음", is_submitted: s.is_submitted,
-      is_participating: s.is_participating, presentation_order: s.presentation_order,
-      evaluations: processedEvals, averageScore: avgTotal.toFixed(2),
-      avgText: avgText.toFixed(2), avgWork1: avgWork1.toFixed(2),
-      avgWork2: avgWork2.toFixed(2), avgWork3: avgWork3.toFixed(2),
-    };
-  });
-
-  res.json(stats);
-});
-
-// Image Upload
-app.post("/api/upload", authenticate, (req, res) => {
-  console.log("[UPLOAD] route reached");
-
-  upload.single("image")(req, res, async (err) => {
+// ──────────────────────────────────────────────
+// 12. 관리자: 데이터 초기화 (트랜잭션)
+// ──────────────────────────────────────────────
+app.post(
+  "/api/admin/clear-data",
+  authMiddleware,
+  adminMiddleware,
+  async (_req: Request, res: Response) => {
+    const client = await db.connect();
     try {
-      if (err) {
-        console.error("[UPLOAD] multer error:", err);
-        if (err instanceof multer.MulterError && err.code === "LIMIT_FILE_SIZE") {
-          return res.status(400).json({ error: "이미지 용량이 너무 큽니다. (최대 10MB)" });
-        }
-        return res.status(400).json({ error: err.message || "업로드 중 오류가 발생했습니다." });
-      }
+      await client.query("BEGIN");
 
-      if (!req.file) {
-        return res.status(400).json({ error: "파일이 없습니다." });
-      }
-
-      if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-        return res.status(500).json({ error: "Supabase Storage 환경변수가 설정되지 않았습니다." });
-      }
-
-      const publicUrl = await uploadImageToSupabase(req.file);
-      return res.json({ url: publicUrl });
-    } catch (error: any) {
-      console.error("[UPLOAD] supabase upload error:", error);
-      return res.status(500).json({ error: error?.message || "Supabase 업로드 중 오류가 발생했습니다." });
-    }
-  });
-});
-
-app.get("/api/admin/backup", authenticate, authorize(["admin"]), async (_req, res) => {
-  try {
-    const proposals = await db.query("SELECT * FROM proposals");
-    const works = await db.query("SELECT * FROM works");
-    const work_images = await db.query("SELECT * FROM work_images");
-    const evaluations = await db.query("SELECT * FROM evaluations");
-    const users = await db.query("SELECT id, username, role, name, student_id FROM users");
-    const rounds = await db.query("SELECT * FROM rounds");
-    res.json({ proposals, works, work_images, evaluations, users, rounds });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post("/api/admin/users/bulk", authenticate, authorize(["admin"]), async (req, res) => {
-  const { users } = req.body;
-  if (!Array.isArray(users)) {
-    return res.status(400).json({ error: "잘못된 데이터 형식입니다." });
-  }
-
-  try {
-    for (const u of users) {
-      const initialPw = u.username;
-      await db.run(
-        `INSERT INTO users (username, password, role, name, student_id, needs_password_change, initial_password)
-         VALUES (?, ?, ?, ?, ?, 1, ?)`,
-        [u.username, hashPassword(initialPw), u.role, u.name, u.role === "student" ? u.username : null, initialPw]
+      const imagesResult = await client.query("SELECT url FROM work_images");
+      const urls = imagesResult.rows.map((r: any) =>
+        r.url.split("/").slice(-2).join("/")
       );
+      if (urls.length > 0) {
+        await supabase.storage.from(STORAGE_BUCKET).remove(urls);
+      }
+
+      await client.query("DELETE FROM presentation_orders");
+      await client.query("DELETE FROM evaluations");
+      await client.query("DELETE FROM work_images");
+      await client.query("DELETE FROM works");
+      await client.query("DELETE FROM proposals");
+
+      await client.query("COMMIT");
+      res.json({ success: true });
+    } catch {
+      await client.query("ROLLBACK");
+      res.status(500).json({ error: "데이터 초기화에 실패했습니다." });
+    } finally {
+      client.release();
     }
-    res.json({ success: true, count: users.length });
-  } catch (err: any) {
-    console.error("[ADMIN] Bulk upload error:", err);
-    res.status(500).json({ error: err.message });
   }
-});
+);
 
-async function startServer() {
-  try {
-    await pgPool.query("SELECT 1");
-    console.log("PostgreSQL connected");
-    await ensureSchema();
-  } catch (err) {
-    console.error("DB connection failed:", err);
+// ──────────────────────────────────────────────
+// 13. 관리자: 시드 데이터 생성 (트랜잭션)
+// ──────────────────────────────────────────────
+app.post(
+  "/api/admin/seed",
+  authMiddleware,
+  adminMiddleware,
+  async (req: Request, res: Response) => {
+    const { roundNumber = 1 } = req.body as { roundNumber?: number };
+    const client = await db.connect();
+    try {
+      await client.query("BEGIN");
+
+      const studentsResult = await client.query(
+        "SELECT id, name FROM users WHERE role = 'student'"
+      );
+      const students = studentsResult.rows;
+
+      for (const student of students) {
+        const existing = await client.query(
+          "SELECT id FROM proposals WHERE student_id = $1 AND round_number = $2",
+          [student.id, roundNumber]
+        );
+        if (existing.rows.length > 0) continue;
+
+        await client.query(
+          `INSERT INTO proposals (student_id, round_number, title, content)
+           VALUES ($1, $2, $3, $4)`,
+          [
+            student.id,
+            roundNumber,
+            `${student.name}의 기획안`,
+            "시드 데이터로 생성된 기획안입니다.",
+          ]
+        );
+      }
+
+      await client.query("COMMIT");
+      res.json({ success: true, seeded: students.length });
+    } catch {
+      await client.query("ROLLBACK");
+      res.status(500).json({ error: "시드 데이터 생성에 실패했습니다." });
+    } finally {
+      client.release();
+    }
+  }
+);
+
+// ──────────────────────────────────────────────
+// 14. 관리자: 백업 (Excel)
+// ──────────────────────────────────────────────
+app.get(
+  "/api/admin/backup",
+  authMiddleware,
+  adminMiddleware,
+  async (_req: Request, res: Response) => {
+    try {
+      const [usersRes, roundsRes, proposalsRes, evalsRes] = await Promise.all([
+        db.query(
+          "SELECT id, username, name, role, department, student_id, created_at FROM users"
+        ),
+        db.query("SELECT * FROM rounds ORDER BY round_number"),
+        db.query(`
+          SELECT p.*, u.name AS student_name, u.student_id AS student_no
+          FROM proposals p
+          JOIN users u ON u.id = p.student_id
+          ORDER BY p.round_number, u.name
+        `),
+        db.query(`
+          SELECT e.*, u.name AS judge_name, p.title AS proposal_title
+          FROM evaluations e
+          JOIN users u ON u.id = e.judge_id
+          JOIN proposals p ON p.id = e.proposal_id
+          ORDER BY e.updated_at DESC
+        `),
+      ]);
+
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(
+        wb,
+        XLSX.utils.json_to_sheet(usersRes.rows),
+        "Users"
+      );
+      XLSX.utils.book_append_sheet(
+        wb,
+        XLSX.utils.json_to_sheet(roundsRes.rows),
+        "Rounds"
+      );
+      XLSX.utils.book_append_sheet(
+        wb,
+        XLSX.utils.json_to_sheet(proposalsRes.rows),
+        "Proposals"
+      );
+      XLSX.utils.book_append_sheet(
+        wb,
+        XLSX.utils.json_to_sheet(evalsRes.rows),
+        "Evaluations"
+      );
+
+      const buffer = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+      const filename = `backup_${new Date().toISOString().slice(0, 10)}.xlsx`;
+
+      res
+        .setHeader("Content-Disposition", `attachment; filename="${filename}"`)
+        .setHeader(
+          "Content-Type",
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+        .send(buffer);
+    } catch {
+      res.status(500).json({ error: "백업 생성에 실패했습니다." });
+    }
+  }
+);
+
+// ──────────────────────────────────────────────
+// 15. 기획안 라우트
+// ──────────────────────────────────────────────
+app.get(
+  "/api/proposals/:roundNumber",
+  authMiddleware,
+  async (req: AuthenticatedRequest, res: Response) => {
+    const roundNumber = parseInt(req.params.roundNumber, 10);
+    const user = req.user!;
+    try {
+      let result;
+      if (user.role === "student") {
+        result = await db.query(
+          `SELECT p.*, u.name AS student_name
+           FROM proposals p
+           JOIN users u ON u.id = p.student_id
+           WHERE p.round_number = $1 AND p.student_id = $2`,
+          [roundNumber, user.id]
+        );
+      } else {
+        result = await db.query(
+          `SELECT p.*, u.name AS student_name, u.student_id AS student_no
+           FROM proposals p
+           JOIN users u ON u.id = p.student_id
+           WHERE p.round_number = $1
+           ORDER BY u.name ASC`,
+          [roundNumber]
+        );
+      }
+      res.json(result.rows);
+    } catch {
+      res.status(500).json({ error: "기획안 목록 조회에 실패했습니다." });
+    }
+  }
+);
+
+app.post(
+  "/api/proposals",
+  authMiddleware,
+  async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const {
+      round_number,
+      title,
+      content,
+      works: rawWorks,
+    } = req.body as {
+      round_number?: number;
+      title?: string;
+      content?: string;
+      works?: unknown;
+    };
+    if (!round_number || !title) {
+      res.status(400).json({ error: "round_number와 title이 필요합니다." });
+      return;
+    }
+    const client = await db.connect();
+    try {
+      await client.query("BEGIN");
+
+      const proposalRes = await client.query(
+        `INSERT INTO proposals (student_id, round_number, title, content)
+         VALUES ($1, $2, $3, $4)
+         RETURNING *`,
+        [user.id, round_number, title.trim(), content ?? null]
+      );
+      const proposal = proposalRes.rows[0];
+      const worksData = normalizeWorks(rawWorks);
+
+      for (const w of worksData) {
+        await client.query(
+          "INSERT INTO works (proposal_id, title, description) VALUES ($1, $2, $3)",
+          [proposal.id, w.title, w.description]
+        );
+      }
+
+      await client.query("COMMIT");
+      res.status(201).json(proposal);
+    } catch {
+      await client.query("ROLLBACK");
+      res.status(500).json({ error: "기획안 생성에 실패했습니다." });
+    } finally {
+      client.release();
+    }
+  }
+);
+
+app.put(
+  "/api/proposals/:id",
+  authMiddleware,
+  async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const { id } = req.params;
+    const {
+      title,
+      content,
+      works: rawWorks,
+    } = req.body as {
+      title?: string;
+      content?: string;
+      works?: unknown;
+    };
+    const client = await db.connect();
+    try {
+      await client.query("BEGIN");
+
+      const existing = await client.query(
+        "SELECT id, student_id, is_final, title FROM proposals WHERE id = $1",
+        [id]
+      );
+      if (existing.rows.length === 0) {
+        await client.query("ROLLBACK");
+        res.status(404).json({ error: "기획안을 찾을 수 없습니다." });
+        return;
+      }
+      const proposal = existing.rows[0];
+      if (user.role !== "admin" && proposal.student_id !== user.id) {
+        await client.query("ROLLBACK");
+        res.status(403).json({ error: "수정 권한이 없습니다." });
+        return;
+      }
+      if (proposal.is_final && user.role !== "admin") {
+        await client.query("ROLLBACK");
+        res
+          .status(403)
+          .json({ error: "최종 제출된 기획안은 수정할 수 없습니다." });
+        return;
+      }
+
+      await client.query(
+        "UPDATE proposals SET title = $1, content = $2, updated_at = NOW() WHERE id = $3",
+        [title ?? proposal.title, content ?? null, id]
+      );
+
+	      const worksData = normalizeWorks(rawWorks);
+      if (worksData.length > 0) {
+        const existingWorks = await client.query(
+          "SELECT id FROM works WHERE proposal_id = $1",
+          [id]
+        );
+        const workIds = existingWorks.rows.map((w: any) => w.id);
+        if (workIds.length > 0) {
+          await client.query(
+            "DELETE FROM work_images WHERE work_id = ANY($1::uuid[])",
+            [workIds]
+          );
+        }
+        await client.query("DELETE FROM works WHERE proposal_id = $1", [id]); // ← 들여쓰기 수정
+        for (const w of worksData) {
+          await client.query(
+            "INSERT INTO works (proposal_id, title, description) VALUES ($1, $2, $3)",
+            [id, w.title, w.description]
+          );
+        }
+      }
+
+      const updated = await client.query(
+        "SELECT * FROM proposals WHERE id = $1",
+        [id]
+      );
+      await client.query("COMMIT");
+      res.json(updated.rows[0]);
+    } catch {
+      await client.query("ROLLBACK");
+      res.status(500).json({ error: "기획안 수정에 실패했습니다." });
+    } finally {
+      client.release();
+    }
+  }
+);
+
+
+    // ──────────────────────────────────────────────
+// 16. 이미지 업로드
+// ──────────────────────────────────────────────
+app.post(
+  "/api/works/:workId/images",
+
+  authMiddleware,
+  upload.single("image"),
+  async (req: AuthenticatedRequest, res: Response) => {
+    const { workId } = req.params;
+    if (!req.file) {
+      res.status(400).json({ error: "이미지 파일이 필요합니다." });
+      return;
+    }
+    try {
+      const ext = req.file.originalname.split(".").pop() ?? "jpg";
+      const filename = `${workId}/${Date.now()}.${ext}`;
+      const { error } = await supabase.storage
+        .from(STORAGE_BUCKET)
+        .upload(filename, req.file.buffer, {
+          contentType: req.file.mimetype,
+          upsert: false,
+        });
+      if (error) {
+        res.status(500).json({ error: "이미지 업로드에 실패했습니다." });
+        return;
+      }
+      const { data: urlData } = supabase.storage
+        .from(STORAGE_BUCKET)
+        .getPublicUrl(filename);
+
+      const result = await db.query(
+        "INSERT INTO work_images (work_id, url) VALUES ($1, $2) RETURNING *",
+        [workId, urlData.publicUrl]
+      );
+      res.status(201).json(result.rows[0]);
+    } catch {
+      res.status(500).json({ error: "이미지 처리 중 오류가 발생했습니다." });
+    }
+  }
+);
+
+// ──────────────────────────────────────────────
+// 17. 평가 라우트 (트랜잭션)
+// ──────────────────────────────────────────────
+app.get(
+  "/api/evaluations/:proposalId",
+  authMiddleware,
+  async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const { proposalId } = req.params;
+    try {
+      let result;
+      if (user.role === "admin") {
+        result = await db.query(
+          `SELECT e.*, u.name AS judge_name
+           FROM evaluations e
+           JOIN users u ON u.id = e.judge_id
+           WHERE e.proposal_id = $1`,
+          [proposalId]
+        );
+      } else {
+        result = await db.query(
+          "SELECT * FROM evaluations WHERE proposal_id = $1 AND judge_id = $2",
+          [proposalId, user.id]
+        );
+      }
+      res.json(result.rows);
+    } catch {
+      res.status(500).json({ error: "평가 조회에 실패했습니다." });
+    }
+  }
+);
+
+app.post(
+  "/api/evaluations",
+  authMiddleware,
+  async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const { proposal_id, scores, comment, is_final } = req.body as {
+      proposal_id?: string;
+      scores?: Record<string, string>;
+      comment?: string;
+      is_final?: boolean;
+    };
+    if (!proposal_id || !scores) {
+      res.status(400).json({ error: "proposal_id와 scores가 필요합니다." });
+      return;
+    }
+
+    // 점수 계산: null이 아닌 항목만 평균 (F=0 포함)
+    const scoreValues = Object.values(scores)
+      .map((g) => scoreOrNull(g))
+      .filter((v): v is number => v !== null);
+    const totalScore =
+      scoreValues.length > 0 ? roundTwo(average(scoreValues)) : null;
+
+    const client = await db.connect();
+    try {
+      await client.query("BEGIN");
+
+      const existing = await client.query(
+        "SELECT id, is_final FROM evaluations WHERE proposal_id = $1 AND judge_id = $2",
+        [proposal_id, user.id]
+      );
+
+      let result;
+      if (existing.rows.length > 0) {
+        if (existing.rows[0].is_final && user.role !== "admin") {
+          await client.query("ROLLBACK");
+          res
+            .status(403)
+            .json({ error: "최종 제출된 평가는 수정할 수 없습니다." });
+          return;
+        }
+        // is_final은 명시적으로 전달된 경우에만 업데이트
+        if (is_final !== undefined) {
+          result = await client.query(
+            `UPDATE evaluations
+             SET scores=$1, comment=$2, total_score=$3, is_final=$4, updated_at=NOW()
+             WHERE proposal_id=$5 AND judge_id=$6
+             RETURNING *`,
+            [scores, comment ?? null, totalScore, is_final, proposal_id, user.id]
+          );
+        } else {
+          result = await client.query(
+            `UPDATE evaluations
+             SET scores=$1, comment=$2, total_score=$3, updated_at=NOW()
+             WHERE proposal_id=$4 AND judge_id=$5
+             RETURNING *`,
+            [scores, comment ?? null, totalScore, proposal_id, user.id]
+          );
+        }
+      } else {
+        result = await client.query(
+          `INSERT INTO evaluations
+             (proposal_id, judge_id, scores, comment, total_score, is_final)
+           VALUES ($1, $2, $3, $4, $5, $6)
+           RETURNING *`,
+          [
+            proposal_id,
+            user.id,
+            scores,
+            comment ?? null,
+            totalScore,
+            is_final ?? false,
+          ]
+        );
+      }
+
+      await client.query("COMMIT");
+      res.json(result.rows[0]);
+    } catch {
+      await client.query("ROLLBACK");
+      res.status(500).json({ error: "평가 저장에 실패했습니다." });
+    } finally {
+      client.release();
+    }
+  }
+);
+
+// 평가 삭제 (본인)
+app.delete(
+  "/api/evaluations/:proposalId",
+  authMiddleware,
+  async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const { proposalId } = req.params;
+    const client = await db.connect();
+    try {
+      await client.query("BEGIN");
+      const existing = await client.query(
+        "SELECT id, is_final FROM evaluations WHERE proposal_id = $1 AND judge_id = $2",
+        [proposalId, user.id]
+      );
+      if (existing.rows.length === 0) {
+        await client.query("ROLLBACK");
+        res.status(404).json({ error: "평가를 찾을 수 없습니다." });
+        return;
+      }
+      if (existing.rows[0].is_final && user.role !== "admin") {
+        await client.query("ROLLBACK");
+        res
+          .status(403)
+          .json({ error: "최종 제출된 평가는 삭제할 수 없습니다." });
+        return;
+      }
+      await client.query(
+        "DELETE FROM evaluations WHERE proposal_id = $1 AND judge_id = $2",
+        [proposalId, user.id]
+      );
+      await client.query("COMMIT");
+      res.json({ success: true });
+    } catch {
+      await client.query("ROLLBACK");
+      res.status(500).json({ error: "평가 삭제에 실패했습니다." });
+    } finally {
+      client.release();
+    }
+  }
+);
+
+// 평가 삭제 (관리자 전용 – 특정 심사위원 지정)
+app.delete(
+  "/api/evaluations/:proposalId/:judgeId",
+  authMiddleware,
+  async (req: AuthenticatedRequest, res: Response) => {
+    const requester = req.user!;
+    const { proposalId, judgeId } = req.params;
+
+    if (requester.role !== "admin" && requester.id !== judgeId) {
+      res.status(403).json({ error: "권한이 없습니다." });
+      return;
+    }
+    const client = await db.connect();
+    try {
+      await client.query("BEGIN");
+      const existing = await client.query(
+        "SELECT id, is_final FROM evaluations WHERE proposal_id = $1 AND judge_id = $2",
+        [proposalId, judgeId]
+      );
+      if (existing.rows.length === 0) {
+        await client.query("ROLLBACK");
+        res.status(404).json({ error: "평가를 찾을 수 없습니다." });
+        return;
+      }
+      if (existing.rows[0].is_final && requester.role !== "admin") {
+        await client.query("ROLLBACK");
+        res
+          .status(403)
+          .json({ error: "최종 제출된 평가는 삭제할 수 없습니다." });
+        return;
+      }
+      await client.query(
+        "DELETE FROM evaluations WHERE proposal_id = $1 AND judge_id = $2",
+        [proposalId, judgeId]
+      );
+      await client.query("COMMIT");
+      res.json({ success: true });
+    } catch {
+      await client.query("ROLLBACK");
+      res.status(500).json({ error: "평가 삭제에 실패했습니다." });
+    } finally {
+      client.release();
+    }
+  }
+);
+
+// ──────────────────────────────────────────────
+// 18. 관리자: 제출안 초기화 (트랜잭션)
+// ──────────────────────────────────────────────
+app.delete(
+  "/api/admin/proposals/:proposalId/reset",
+  authMiddleware,
+  adminMiddleware,
+  async (req: Request, res: Response) => {
+    const { proposalId } = req.params;
+    const client = await db.connect();
+    try {
+      await client.query("BEGIN");
+
+      const proposalResult = await client.query(
+        "SELECT id FROM proposals WHERE id = $1",
+        [proposalId]
+      );
+      if (proposalResult.rows.length === 0) {
+        await client.query("ROLLBACK");
+        res.status(404).json({ error: "기획안을 찾을 수 없습니다." });
+        return;
+      }
+
+      const worksResult = await client.query(
+        "SELECT id FROM works WHERE proposal_id = $1",
+        [proposalId]
+      );
+      const workIds = worksResult.rows.map((w: any) => w.id);
+
+      if (workIds.length > 0) {
+        const urlResult = await client.query(
+          "SELECT url FROM work_images WHERE work_id = ANY($1::uuid[])",
+          [workIds]
+        );
+        const paths = urlResult.rows.map((r: any) =>
+          r.url.split("/").slice(-2).join("/")
+        );
+        if (paths.length > 0) {
+          await supabase.storage.from(STORAGE_BUCKET).remove(paths);
+        }
+        await client.query(
+          "DELETE FROM work_images WHERE work_id = ANY($1::uuid[])",
+          [workIds]
+        );
+      }
+
+      await client.query(
+        "DELETE FROM evaluations WHERE proposal_id = $1",
+        [proposalId]
+      );
+      await client.query("DELETE FROM works WHERE proposal_id = $1", [proposalId]);
+      await client.query("DELETE FROM proposals WHERE id = $1", [proposalId]);
+
+      await client.query("COMMIT");
+      res.json({ success: true });
+    } catch {
+      await client.query("ROLLBACK");
+      res.status(500).json({ error: "제출안 초기화에 실패했습니다." });
+    } finally {
+      client.release();
+    }
+  }
+);
+
+// ──────────────────────────────────────────────
+// 19. 발표 순서 관리
+// ──────────────────────────────────────────────
+app.get(
+  "/api/admin/presentation-order/:roundNumber",
+  authMiddleware,
+  adminMiddleware,
+  async (req: Request, res: Response) => {
+    const roundNumber = parseInt(req.params.roundNumber, 10);
+    try {
+      const result = await db.query(
+        `SELECT po.*, p.title, u.name AS student_name, u.student_id AS student_no
+         FROM presentation_orders po
+         JOIN proposals p ON p.id = po.proposal_id
+         JOIN users u ON u.id = p.student_id
+         WHERE po.round_number = $1
+         ORDER BY po.order_index ASC`,
+        [roundNumber]
+      );
+      res.json(result.rows);
+    } catch {
+      res.status(500).json({ error: "발표 순서 조회에 실패했습니다." });
+    }
+  }
+);
+
+app.post(
+  "/api/admin/presentation-order",
+  authMiddleware,
+  adminMiddleware,
+  async (req: Request, res: Response) => {
+    const { round_number, orders } = req.body as {
+      round_number?: number;
+      orders?: Array<{ proposal_id: string; order_index: number }>;
+    };
+    if (!round_number || !Array.isArray(orders)) {
+      res
+        .status(400)
+        .json({ error: "round_number와 orders 배열이 필요합니다." });
+      return;
+    }
+    const client = await db.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        "DELETE FROM presentation_orders WHERE round_number = $1",
+        [round_number]
+      );
+      for (const o of orders) {
+        await client.query(
+          `INSERT INTO presentation_orders (round_number, proposal_id, order_index)
+           VALUES ($1, $2, $3)`,
+          [round_number, o.proposal_id, o.order_index]
+        );
+      }
+      await client.query("COMMIT");
+      res.json({ success: true });
+    } catch {
+      await client.query("ROLLBACK");
+      res.status(500).json({ error: "발표 순서 저장에 실패했습니다." });
+    } finally {
+      client.release();
+    }
+  }
+);
+
+// ──────────────────────────────────────────────
+// 20. 심사위원: 학생 목록 조회 (라운드 기준)
+// ──────────────────────────────────────────────
+app.get(
+  "/api/judge/students",
+  authMiddleware,
+  async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    if (user.role !== "judge" && user.role !== "admin") {
+      res.status(403).json({ error: "심사위원 권한이 필요합니다." });
+      return;
+    }
+    const roundNumber = parseInt(req.query.roundNumber as string, 10);
+    if (isNaN(roundNumber)) {
+      res.status(400).json({ error: "유효한 roundNumber가 필요합니다." });
+      return;
+    }
+    try {
+      const result = await db.query(
+        `SELECT u.id, u.name, u.student_id AS student_no, u.department,
+                p.id AS proposal_id, p.title AS proposal_title, p.is_final,
+                e.id AS evaluation_id, e.is_final AS evaluation_final, e.total_score
+         FROM proposals p
+         JOIN users u ON u.id = p.student_id
+         LEFT JOIN evaluations e ON e.proposal_id = p.id AND e.judge_id = $1
+         WHERE p.round_number = $2
+         ORDER BY u.name ASC`,
+        [user.id, roundNumber]
+      );
+      res.json(result.rows);
+    } catch {
+      res.status(500).json({ error: "학생 목록 조회에 실패했습니다." });
+    }
+  }
+);
+
+// ──────────────────────────────────────────────
+// 21. 서버 시작
+// ──────────────────────────────────────────────
+ensureSchema()
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log(`서버가 포트 ${PORT}에서 실행 중입니다.`);
+    });
+  })
+  .catch((err) => {
+    console.error("스키마 초기화 실패:", err);
     process.exit(1);
-  }
-
-  if (!IS_PROD) {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
-    app.use(vite.middlewares);
-  } else {
-    app.use(express.static(path.join(process.cwd(), "dist")));
-    app.get("*", (_req, res) => {
-      res.sendFile(path.join(process.cwd(), "dist", "index.html"));
-    });
-  }
-
-  app.use((err: any, _req: any, res: any, _next: any) => {
-    console.error("[SERVER ERROR]", err);
-    res.status(500).json({ error: "서버 내부 오류가 발생했습니다: " + (err.message || String(err)) });
   });
-
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-  });
-}
-
-startServer();
