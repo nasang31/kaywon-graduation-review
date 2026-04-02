@@ -8,6 +8,8 @@ import jwt from "jsonwebtoken";
 import cookieParser from "cookie-parser";
 import { createClient } from "@supabase/supabase-js";
 import * as XLSX from "xlsx";
+import path from "path";
+import { fileURLToPath } from "url";
 
 // ──────────────────────────────────────────────
 // 1. 환경변수 필수 검증
@@ -1492,7 +1494,22 @@ app.get(
 );
 
 // ──────────────────────────────────────────────
-// 22. 서버 시작
+// 22. 프론트엔드 정적 파일 서빙 (React 빌드 결과물)
+// ──────────────────────────────────────────────
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const distPath = path.join(__dirname, "dist");
+app.use(express.static(distPath));
+
+// React Router 처리 — /api 외 모든 경로를 index.html로
+app.get(/^(?!\/api).*$/, (_req: Request, res: Response) => {
+  res.sendFile(path.join(distPath, "index.html"));
+});
+
+// ──────────────────────────────────────────────
+// 23. 서버 시작
 // ──────────────────────────────────────────────
 ensureSchema()
   .then(() => {
