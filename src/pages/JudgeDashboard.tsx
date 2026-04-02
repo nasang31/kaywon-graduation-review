@@ -428,6 +428,7 @@ export default function JudgeDashboard({
   onBackToAdminStats,
 }: JudgeDashboardProps) {
   const [selectedRound, setSelectedRound] = useState(forcedRound || 1);
+  const [isForcedLoading, setIsForcedLoading] = useState(!!forcedProposalId);
   const [students, setStudents] = useState<any[]>([]);
   const [selectedProposal, setSelectedProposal] = useState<Proposal | null>(null);
   const [zoomImage, setZoomImage] = useState<string | null>(null);
@@ -508,7 +509,10 @@ export default function JudgeDashboard({
   }, [selectedRound]);
 
   useEffect(() => {
-    if (forcedProposalId) handleSelectStudent(forcedProposalId);
+    if (forcedProposalId) {
+      setIsForcedLoading(true);
+      handleSelectStudent(forcedProposalId).finally(() => setIsForcedLoading(false));
+    }
   }, [forcedProposalId]);
 
   useEffect(() => {
@@ -1116,6 +1120,14 @@ export default function JudgeDashboard({
             </div>
           )}
         </AnimatePresence>
+      </div>
+    );
+  }
+
+  if (isForcedLoading) {
+    return (
+      <div className="flex items-center justify-center py-40">
+        <div className="w-8 h-8 border-2 border-black/20 border-t-black rounded-full animate-spin" />
       </div>
     );
   }
