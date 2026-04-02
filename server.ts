@@ -186,7 +186,7 @@ async function ensureSchema(): Promise<void> {
 
   // 초기 관리자 계정
   const adminExists = await db.query(
-    "SELECT id FROM users WHERE username = $1", ["admin"]
+    "SELECT 1 FROM users WHERE username = $1", ["admin"]
   );
   if (adminExists.rows.length === 0) {
     const hashed = await hashPassword("admin1234");
