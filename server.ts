@@ -766,12 +766,33 @@ app.get("/api/proposals/reference/:userId/:roundNumber", authenticate, async (re
 });
 
 // Judge API
-app.get("/api/students/:roundNumber", authenticate, authorize(["judge", "admin"]), async (req: any, res) => {
-  const judgeId = String(req.query.judgeId || "");
-  if (req.user.role === "judge" && req.user.id !== judgeId) {
-    return res.status(403).json({ error: "권한이 없습니다." });
+// [추가] 프론트에서 사용하는 /api/judge/students?roundNumber= 경로
+app.get("/api/judge/students", authenticate, authorize(["judge", "admin"]), async (req: any, res) => {
+  const judgeId = String(req.user.id);
+  const roundNumber = req.query.roundNumber;
+  if (!roundNumber) {
+    return res.status(400).json({ error: "roundNumber가 필요합니다." });
   }
+  const students = await db.query(
+    `SELECT p.*, u.name as student_name,
+     (SELECT COUNT(*)::int FROM evaluations ev WHERE ev.proposal_id = p.id) as total_eval_count,
+     (SELECT COUNT(*)::int FROM evaluations ev WHERE ev.proposal_id = p.id AND ev.judge_id = ?) as my_eval_count,
+     e.text_grade as my_text_grade, e.work1_grade as my_work1_grade,
+     e.work2_grade as my_work2_grade, e.work3_grade as my_work3_grade,
+     e.is_final as my_is_final
+     FROM proposals p
+     JOIN users u ON p.user_id = u.id
+     LEFT JOIN evaluations e ON e.proposal_id = p.id AND e.judge_id = ?
+     WHERE p.round_number = ? AND p.is_participating = 1
+     ORDER BY p.presentation_order ASC, p.created_at ASC`,
+    [judgeId, judgeId, roundNumber]
+  );
+  res.json(students);
+});
 
+// 기존 경로 유지 (하위 호환)
+app.get("/api/students/:roundNumber", authenticate, authorize(["judge", "admin"]), async (req: any, res) => {
+  const judgeId = String(req.query.judgeId || req.user.id);
   const students = await db.query(
     `SELECT p.*, u.name as student_name,
      (SELECT COUNT(*)::int FROM evaluations ev WHERE ev.proposal_id = p.id) as total_eval_count,
