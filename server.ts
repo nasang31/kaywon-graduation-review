@@ -875,11 +875,21 @@ app.post("/api/evaluations", authenticate, authorize(["judge", "admin"]), async 
     return res.status(403).json({ error: "권한이 없습니다." });
   }
 
-  try {
-    // ✅ is_final 파라미터 바인딩 안정화 — CASE WHEN ? = true 대신 서버에서 직접 계산
-    const finalizedAtSql = is_final ? "now()" : "NULL";
+ try {
+    // ✅ 기존 평가 is_final 체크 — 최종 확정된 평가는 수정 불가
+    const existingEval = await db.get(
+      "SELECT is_final FROM evaluations WHERE proposal_id = ? AND judge_id = ?",
+      [proposalId, judgeId]
+    ) as any;
 
+    if (existingEval?.is_final === true || existingEval?.is_final === 1 || existingEval?.is_final === 't') {
+      return res.status(403).json({ error: "이미 최종 확정된 평가는 수정할 수 없습니다." });
+    }
+
+    // ✅ is_final 파라미터 바인딩 안정화
+    const finalizedAtSql = is_final ? "now()" : "NULL";
     await pgPool.query(
+    
       `INSERT INTO evaluations (
         proposal_id, judge_id, text_grade, work1_grade, work2_grade, work3_grade, comment, is_final, finalized_at
       )
