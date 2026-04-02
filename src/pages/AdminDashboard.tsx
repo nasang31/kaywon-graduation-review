@@ -16,6 +16,7 @@ interface AdminDashboardProps {
 export default function AdminDashboard({ user }: AdminDashboardProps) {
   const [activeTab, setActiveTab] = useState<'stats' | 'users' | 'rounds' | 'ordering'>('stats');
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
+  const [selectedStudentRound, setSelectedStudentRound] = useState<number>(1);
   const [stats, setStats] = useState<any[]>([]);
   const [users, setUsers] = useState<UserType[]>([]);
   const [rounds, setRounds] = useState<any[]>([]);
@@ -505,9 +506,10 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
         <JudgeDashboard
           user={user}
           forcedProposalId={selectedStudentId}
+          forcedRound={selectedStudentRound}
           entrySource="admin"
           onBackToAdminStats={() => setSelectedStudentId(null)}
-        />
+      />
       </div>
     );
   }
@@ -658,7 +660,7 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
                             <td className="px-6 py-4 text-sm font-mono">{s.student_id}</td>
                             <td className="px-6 py-4 text-sm font-bold">
                               <button
-                                onClick={() => s.id && setSelectedStudentId(s.id)}
+                                onClick={() => { if (s.id) { setSelectedStudentId(s.id); setSelectedStudentRound(selectedRound); } }}
                                 disabled={!s.id}
                                 title={s.id ? '클릭하여 심사 상세 보기' : '기획안 미제출 학생'}
                                 className={`${s.id ? 'hover:text-blue-600 transition-colors cursor-pointer' : 'cursor-not-allowed opacity-40'} text-left`}
