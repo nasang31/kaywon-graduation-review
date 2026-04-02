@@ -197,7 +197,7 @@ async function ensureSchema(): Promise<void> {
   // 기본 라운드 1~3
   for (let i = 1; i <= 3; i++) {
     const exists = await db.query(
-      "SELECT id FROM rounds WHERE round_number = $1", [i]
+      "SELECT 1 FROM rounds WHERE round_number = $1", [i]
     );
     if (exists.rows.length === 0) {
       await db.query(
